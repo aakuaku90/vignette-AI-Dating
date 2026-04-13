@@ -181,14 +181,14 @@ Open http://localhost:3000 to start.
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DATABASE_URL` | PostgreSQL connection string (asyncpg) | `postgresql+asyncpg://chase:chase_dev_password@localhost:5432/chase` |
-| `ADMIN_SECRET` | Password for admin dashboard access | `chase-research-2026` |
+| `ADMIN_SECRET` | Password for admin dashboard access | *(set your own)* |
 
 ### Frontend
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `NEXT_PUBLIC_API_URL` | Backend API URL | `http://localhost:8000` |
-| `NEXT_PUBLIC_ADMIN_SLUG` | Secret URL slug for admin pages | `r9k4x7m2b8f1n5p3q6w0t4v8` |
+| `NEXT_PUBLIC_ADMIN_SLUG` | Secret URL slug for admin pages | *(set your own)* |
 
 ---
 
@@ -228,8 +228,8 @@ The researcher dashboard is protected by two layers:
 
 ### Accessing the Dashboard
 
-1. Navigate to `/admin/r9k4x7m2b8f1n5p3q6w0t4v8` (or your custom slug)
-2. Enter the admin password (`chase-research-2026` by default)
+1. Navigate to `/admin/{your-slug}` (set via `NEXT_PUBLIC_ADMIN_SLUG`)
+2. Enter the admin password (set via `ADMIN_SECRET`)
 3. View participant data, stats, individual responses, and charts
 4. Export data as CSV for external analysis
 
