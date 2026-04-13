@@ -13,7 +13,7 @@ Built as a full-stack web application with a swipe-card interface, narrative-dri
 - [Environment Variables](#environment-variables)
 - [API Reference](#api-reference)
 - [Admin Dashboard](#admin-dashboard)
-- [Deployment](#deployment)
+- [Security Notes](#security-notes)
 
 ---
 
@@ -246,42 +246,6 @@ The charts page includes 9 research-focused sections:
 7. **Baseline Correlation** - Phase 1 agreement vs Phase 3 AI acceptance
 8. **Participant Retention** - Dropoff tracking across stages
 9. **Per-Stage Card Breakdown** - All 8 cards for each of 10 stages
-
----
-
-## Deployment
-
-### Recommended Stack (Free Tier)
-
-| Service | Provider | Purpose |
-|---------|----------|---------|
-| Frontend | [Vercel](https://vercel.com) | Next.js hosting with edge network |
-| Backend | [Render](https://render.com) | FastAPI web service |
-| Database | [Neon](https://neon.tech) | Serverless PostgreSQL |
-
-### Vercel (Frontend)
-
-1. Connect your GitHub repo to Vercel
-2. Set root directory to `frontend`
-3. Add environment variables:
-   - `NEXT_PUBLIC_API_URL` = your Render backend URL
-   - `NEXT_PUBLIC_ADMIN_SLUG` = your chosen slug
-
-### Render (Backend)
-
-1. Create a new Web Service from your GitHub repo
-2. Set root directory to `backend`
-3. Build command: `pip install -r requirements.txt`
-4. Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-5. Add environment variables:
-   - `DATABASE_URL` = your Neon connection string
-   - `ADMIN_SECRET` = your admin password
-
-### Neon (Database)
-
-1. Create a free project at neon.tech
-2. Copy the connection string (use the asyncpg/pooled format)
-3. Set it as `DATABASE_URL` in your backend environment
 
 ---
 
