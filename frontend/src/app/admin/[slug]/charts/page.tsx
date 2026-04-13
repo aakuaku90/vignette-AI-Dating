@@ -3,6 +3,8 @@
 import { useEffect, useState, useMemo } from "react";
 import { api } from "@/lib/api";
 import type { Participant } from "@/lib/api";
+
+const ADMIN_SLUG = process.env.NEXT_PUBLIC_ADMIN_SLUG || "r9k4x7m2b8f1n5p3q6w0t4v8";
 import { PHASE1_CARDS, STAGES } from "@/lib/instrument";
 import {
   BarChart,
@@ -420,7 +422,7 @@ export default function ChartsPage() {
             <h1 className="text-3xl font-bold">Charts & Analytics</h1>
             <p className="text-zinc-400 text-sm">The Chase · Research Analysis</p>
           </div>
-          <a href="/admin" className="btn-secondary inline-block">
+          <a href={`/admin/${ADMIN_SLUG}`} className="btn-secondary inline-block">
             Back to Dashboard
           </a>
         </div>

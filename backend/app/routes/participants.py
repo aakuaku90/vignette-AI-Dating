@@ -2,11 +2,12 @@ import random
 import string
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import select, func as sqlfunc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from ..config import settings
 from ..database import get_db
 from ..models.models import Participant, Response
 from ..schemas.schemas import (
@@ -142,14 +143,25 @@ async def get_responses(session_code: str, db: AsyncSession = Depends(get_db)):
 
 # --- Admin endpoints ---
 
+
+async def require_admin(x_admin_key: str = Header(None)):
+    if not x_admin_key or x_admin_key != settings.admin_secret:
+        raise HTTPException(status_code=401, detail="Invalid admin key")
+
+
+@router.post("/admin/verify")
+async def verify_admin_key(_: None = Depends(require_admin)):
+    return {"status": "ok"}
+
+
 @router.get("/admin/participants", response_model=list[ParticipantOut])
-async def list_participants(db: AsyncSession = Depends(get_db)):
+async def list_participants(_: None = Depends(require_admin), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Participant).order_by(Participant.started_at.desc()))
     return result.scalars().all()
 
 
 @router.get("/admin/participants/{session_code}", response_model=ParticipantDetail)
-async def get_participant_detail(session_code: str, db: AsyncSession = Depends(get_db)):
+async def get_participant_detail(session_code: str, _: None = Depends(require_admin), db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Participant)
         .where(Participant.session_code == session_code)
@@ -162,7 +174,7 @@ async def get_participant_detail(session_code: str, db: AsyncSession = Depends(g
 
 
 @router.get("/admin/stats", response_model=AdminStats)
-async def get_stats(db: AsyncSession = Depends(get_db)):
+async def get_stats(_: None = Depends(require_admin), db: AsyncSession = Depends(get_db)):
     total = await db.execute(select(sqlfunc.count(Participant.id)))
     completed = await db.execute(
         select(sqlfunc.count(Participant.id)).where(Participant.completed_at.isnot(None))
@@ -189,7 +201,7 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/admin/export")
-async def export_data(db: AsyncSession = Depends(get_db)):
+async def export_data(_: None = Depends(require_admin), db: AsyncSession = Depends(get_db)):
     """Export all responses as a flat list for analysis."""
     result = await db.execute(
         select(
