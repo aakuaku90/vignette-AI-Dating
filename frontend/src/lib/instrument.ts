@@ -139,7 +139,7 @@ export const SCENARIOS: Scenario[] = [
     right: [
       {
         code: "A-R1",
-        text: "The AI sends you your match, but you cannot see anyone else's profile until you and the match either connect or both pass after meeting in person.",
+        text: "The AI sends you your match, and you cannot receive any new matches until you and this person have either agreed to keep seeing each other or both confirmed you want to move on.",
       },
       {
         code: "A-R2",
@@ -157,7 +157,7 @@ export const SCENARIOS: Scenario[] = [
       },
       {
         code: "A-L2",
-        text: "The AI curates matches and also provides a browsing option with up to twenty additional profiles if you want to see more.",
+        text: "You can switch back to traditional swiping at any time if the curated match approach is not working for you.",
       },
       {
         code: "A-L3",
@@ -182,7 +182,7 @@ export const SCENARIOS: Scenario[] = [
       },
       {
         code: "B-R3",
-        text: "After a month of using the tool, you realize you have stopped writing your own messages entirely. Every reply has been drafted or edited by the AI.",
+        text: "The AI learns your style so completely that over time it can draft replies that read as indistinguishable from your own writing. You rarely need to edit what it suggests.",
       },
     ],
     left: [
@@ -217,13 +217,13 @@ export const SCENARIOS: Scenario[] = [
       },
       {
         code: "C-R3",
-        text: "The AI observes the meetup through each participant's phone and follows up afterward with its own analysis of who seemed most compatible with you.",
+        text: "Each participant's phone records the conversation during the meetup so the AI can analyze afterward who seemed most compatible with you.",
       },
     ],
     left: [
       {
         code: "C-L1",
-        text: "The AI suggests the group and explains why each person was chosen. You can opt out of any specific meetup.",
+        text: "The AI suggests the group, and you can opt out of any specific meetup before it happens without penalty.",
       },
       {
         code: "C-L2",
