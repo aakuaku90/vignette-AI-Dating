@@ -42,6 +42,17 @@ export interface Participant {
   current_stage: number;
   email: string | null;
   phone: string | null;
+  warmup_w1: string | null;
+  warmup_w2: string | null;
+  warmup_w3: string | null;
+  warmup_w4: string | null;
+  debrief_d1: string | null;
+  debrief_d2: string | null;
+  debrief_d3: string | null;
+  debrief_d4: string | null;
+  debrief_d5: string | null;
+  debrief_d6: string | null;
+  scenario_order: string | null;
 }
 
 export interface SwipeResponseData {
@@ -51,6 +62,7 @@ export interface SwipeResponseData {
   card_number: number;
   swiped_right: boolean;
   response_time_ms: number | null;
+  variant_code: string | null;
   created_at: string;
 }
 
@@ -72,11 +84,43 @@ export const api = {
       card_number: number;
       swiped_right: boolean;
       response_time_ms?: number;
+      variant_code?: string;
     }
   ) =>
     request<SwipeResponseData>(`/api/participants/${code}/swipe`, {
       method: "POST",
       body: JSON.stringify(data),
+    }),
+
+  updateWarmup: (
+    code: string,
+    data: { warmup_w1?: string; warmup_w2?: string; warmup_w3?: string; warmup_w4?: string }
+  ) =>
+    request<Participant>(`/api/participants/${code}/warmup`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  updateDebrief: (
+    code: string,
+    data: {
+      debrief_d1?: string;
+      debrief_d2?: string;
+      debrief_d3?: string;
+      debrief_d4?: string;
+      debrief_d5?: string;
+      debrief_d6?: string;
+    }
+  ) =>
+    request<Participant>(`/api/participants/${code}/debrief`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  updateScenarioOrder: (code: string, scenarioOrder: string) =>
+    request<Participant>(`/api/participants/${code}/scenario-order`, {
+      method: "PATCH",
+      body: JSON.stringify({ scenario_order: scenarioOrder }),
     }),
 
   updateDemographics: (code: string, data: { age?: number; gender?: string; university?: string; state?: string; consented?: boolean }) =>

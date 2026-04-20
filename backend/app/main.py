@@ -1,21 +1,11 @@
-from contextlib import asynccontextmanager
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
-from .database import Base, engine
 from .routes.participants import router as participants_router
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield
-
-
-app = FastAPI(title="The Chase API", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Swipe to Decide API", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,

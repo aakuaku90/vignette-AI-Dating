@@ -19,7 +19,7 @@ export default function ConsentPage() {
           <section>
             <h2 className="text-lg font-semibold text-zinc-800 mb-2">Study Title</h2>
             <p>
-              The Chase: Exploring Gen Z Attitudes Toward AI Involvement in Dating and Romantic Relationships
+              The AI Response: Gen Z Dating App Fatigue, Artificial Intelligence, and the Future of Romantic Connection Among College Students
             </p>
           </section>
 
@@ -37,8 +37,9 @@ export default function ConsentPage() {
             <h2 className="text-lg font-semibold text-zinc-800 mb-2">What You Will Do</h2>
             <ul className="list-disc pl-5 space-y-1.5">
               <li>Provide optional demographic information (age, gender, university, state)</li>
-              <li>Read a series of dating-related scenarios involving AI technology</li>
-              <li>Swipe right (agree/comfortable) or left (disagree/uncomfortable) on each scenario</li>
+              <li>Answer a few short warmup questions about your own dating app history</li>
+              <li>See twelve short scenarios describing ways AI might be involved in dating</li>
+              <li>Swipe right if you would be willing to use the feature, left if you would not</li>
               <li>Review reflection questions at the end of the study</li>
               <li>Optionally provide contact information if you would like to discuss your responses with a researcher</li>
             </ul>
@@ -47,7 +48,7 @@ export default function ConsentPage() {
           <section>
             <h2 className="text-lg font-semibold text-zinc-800 mb-2">Time Commitment</h2>
             <p>
-              The study takes approximately 60 minutes to complete. You may pause and resume at
+              The study takes approximately 10 minutes to complete. You may pause and resume at
               any time using the same browser.
             </p>
           </section>

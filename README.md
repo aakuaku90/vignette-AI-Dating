@@ -1,8 +1,10 @@
-# The Chase
+# Swipe to Decide
 
-A gamified research instrument exploring Gen Z attitudes toward AI involvement in dating and romantic relationships. Participants swipe through scenario-based vignettes that progressively introduce AI into the dating process, from AI-curated matching to AI-generated messages sent without consent.
+A vignette research instrument exploring Gen Z attitudes toward AI involvement in dating and romantic relationships. Part of the study *"The AI Response: Gen Z Dating App Fatigue, Artificial Intelligence, and the Future of Romantic Connection Among College Students"* (UC Berkeley School of Information).
 
-Built as a full-stack web application with a swipe-card interface, narrative-driven phases, and a researcher dashboard for real-time analytics.
+Participants complete a short warmup about their own dating app history, then swipe through twelve scenario vignettes organized into three base scenarios with counter-pressure branching: each base prompt is followed by three variants that either add friction (if the participant accepted) or offer reassurance (if they rejected). The instrument surfaces the specific conditions under which stances on AI involvement shift.
+
+Built as a full-stack web application with a swipe-card interface and a researcher dashboard.
 
 ## Table of Contents
 
@@ -19,35 +21,42 @@ Built as a full-stack web application with a swipe-card interface, narrative-dri
 
 ## Research Design
 
-### Participant Journey
+### Participant Journey (~10 minutes, 12 swipes)
 
 | Phase | Name | Description |
 |-------|------|-------------|
 | 0 | **About You** | Optional demographics (age, gender, university, state) + informed consent |
-| 1 | **Your Story** | 10 cards about past dating app experiences (baseline) |
-| 2 | **The World Has Changed** | Narrative context: it's 2026 and AI is now embedded in dating |
-| 3 | **The Chase** | 10 stages x 8 cards each (80 vignettes) with escalating AI involvement |
-| 4 | **Debrief** | 12 reflection questions + optional researcher discussion signup |
+| 1 | **Onboarding** | Brief orientation to the swipe mechanic |
+| 2 | **Pre-Swipe Warmup** | Four short questions about the participant's own dating app history |
+| 3 | **Swipe to Decide** | 3 base scenarios, each followed by 3 counter-pressure variants (12 swipes total) |
+| 4 | **Debrief** | Reflection prompts covering each scenario + optional researcher discussion signup |
 
-### Phase 3 Stages
+### The Three Base Scenarios
 
-Each stage presents a scenario vignette followed by 8 swipe cards:
+Each scenario targets one of the three exit factors identified in the literature. Scenarios are presented in randomized order to control for order effects.
 
-1. **The Voice That Knows You** - AI voice onboarding
-2. **The Text You Did Not Expect** - AI-curated text introductions
-3. **The Gathering** - AI-arranged group meetups
-4. **The Simulation** - AI compatibility simulation (pre-date preview)
-5. **The Date Someone Else Planned** - Fully AI-planned dates
-6. **The Coach in Your Pocket** - Real-time AI conversation coaching
-7. **The Message You Did Not Write** - AI sends messages without permission
-8. **After the Date** - AI post-date data collection and learning
-9. **The Connection Compared** - Traditional apps vs AI platforms
-10. **The Reveal** - AI chatfishing detection
+| Code | Scenario | Targeted Exit Factor |
+|------|----------|----------------------|
+| A | **AI Curated Matching** | Swipe fatigue and the paradox of choice |
+| B | **AI Conversation Coaching** | Perceived inauthenticity and commodification |
+| C | **AI Group Meetup** | Desire for organic connection |
+
+### Two-Pass, Counter-Pressure Branching
+
+- **Pass 1 (Baseline, 3 swipes):** One swipe on each scenario's base prompt.
+- **Pass 2 (Counter-pressure, 9 swipes):** Each base prompt branches into one of two paths based on the participant's direction:
+  - **Right-swipe path** adds three escalating friction variants (R1 → R3) to test whether initial acceptance is conditional.
+  - **Left-swipe path** offers three softening variants (L1 → L3) to test whether initial rejection is absolute.
+- **Flip points** (direction changes within a branch) are flagged as primary analytic anchors for follow-up interviews.
 
 ### Data Collected
 
-- **Swipe direction** (right = accept/comfortable, left = reject/uncomfortable)
+- **Swipe direction** (right = would use, left = would not)
 - **Response time** in milliseconds (hesitation proxy)
+- **Variant code** (e.g. `A-base`, `B-R2`, `C-L3`) identifying scenario + variant
+- **Position in sequence** (stage index in the randomized order)
+- **Scenario order** per participant (stored to support within-session effects analysis)
+- **Warmup answers** (W1 prior use, W2 frequency, W3 exit behavior, W4 open reflection)
 - **Demographics** (optional: age, gender, university, state)
 - **Contact info** (optional: email, phone for follow-up discussions)
 - All sessions are anonymous by default (identified by 8-character session code)
@@ -204,7 +213,9 @@ Open http://localhost:3000 to start.
 | `PATCH` | `/api/participants/{code}/demographics` | Update demographics + consent |
 | `PATCH` | `/api/participants/{code}/progress` | Update current phase/stage |
 | `PATCH` | `/api/participants/{code}/contact` | Update email/phone |
-| `POST` | `/api/participants/{code}/swipe` | Record a swipe response |
+| `PATCH` | `/api/participants/{code}/warmup` | Save warmup answers (W1-W4) |
+| `PATCH` | `/api/participants/{code}/scenario-order` | Persist randomized scenario order (e.g. `"B,A,C"`) |
+| `POST` | `/api/participants/{code}/swipe` | Record a swipe response (includes `variant_code`) |
 | `GET` | `/api/participants/{code}/responses` | Get all responses for participant |
 
 ### Admin Endpoints (require `X-Admin-Key` header)
@@ -235,17 +246,7 @@ The researcher dashboard is protected by two layers:
 
 ### Analytics Charts
 
-The charts page includes 9 research-focused sections:
-
-1. **Participant Demographics** - Gender, phase distribution, universities, states, signups over time
-2. **Phase 1 Baseline** - Accept/reject rates per dating history card
-3. **AI Comfort Trajectory** - Acceptance rate across escalating AI involvement stages
-4. **Ethical Threshold Analysis** - Key boundary cards (consent, safety, autonomy, deception)
-5. **Hesitation Analysis** - Response time as uncertainty proxy (accept vs reject)
-6. **Gender Comparison** - Male vs female acceptance across stages
-7. **Baseline Correlation** - Phase 1 agreement vs Phase 3 AI acceptance
-8. **Participant Retention** - Dropoff tracking across stages
-9. **Per-Stage Card Breakdown** - All 8 cards for each of 10 stages
+The charts page is being rebuilt against the new scenario + variant data model. Until the rewrite lands, the dashboard table view, per-participant response timeline, and CSV export are the primary analysis surfaces.
 
 ---
 

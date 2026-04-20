@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { Participant, SwipeResponseData } from "@/lib/api";
-import { PHASE1_CARDS, STAGES } from "@/lib/instrument";
+import { SCENARIO_BY_CODE, SCENARIOS } from "@/lib/instrument";
 
 interface Stats {
   total_participants: number;
@@ -13,6 +13,18 @@ interface Stats {
 }
 
 const ADMIN_SLUG = process.env.NEXT_PUBLIC_ADMIN_SLUG || "r9k4x7m2b8f1n5p3q6w0t4v8";
+
+// Internal phase → user-facing label. "Start" is the pre-study demographics step;
+// the 4 numbered phases are onboarding+warmup (1), Pass 1 (2), Pass 2 (3), Debrief (4).
+const PHASE_DISPLAY: Record<number, string> = {
+  0: "Start",
+  1: "1",
+  2: "1",
+  3: "2",
+  4: "3",
+  5: "4",
+};
+const displayPhase = (p: number) => PHASE_DISPLAY[p] ?? String(p);
 
 export default function AdminPage() {
   const [stats, setStats] = useState<Stats | null>(null);
@@ -74,13 +86,14 @@ export default function AdminPage() {
     );
   }
 
-  const getCardText = (phase: number, stage: number, cardNumber: number): string => {
-    if (phase === 1) return PHASE1_CARDS[cardNumber - 1]?.text ?? `Card ${cardNumber}`;
-    if (phase === 3) {
-      const s = STAGES.find((st) => st.number === stage);
-      return s?.cards[cardNumber - 1]?.text ?? `Stage ${stage} Card ${cardNumber}`;
-    }
-    return `Card ${cardNumber}`;
+  const getCardText = (variantCode: string | null): string => {
+    if (!variantCode) return "(no variant)";
+    const [scenarioCode, variant] = variantCode.split("-");
+    const scenario = SCENARIO_BY_CODE[scenarioCode];
+    if (!scenario) return variantCode;
+    if (variant === "base") return scenario.base;
+    const pool = variant?.startsWith("R") ? scenario.right : scenario.left;
+    return pool.find((v) => v.code === variantCode)?.text ?? variantCode;
   };
 
   return (
@@ -89,7 +102,7 @@ export default function AdminPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold">Researcher Dashboard</h1>
-            <p className="text-zinc-400 text-sm">The Chase · Data Overview</p>
+            <p className="text-zinc-400 text-sm">Swipe to Decide · Data Overview</p>
           </div>
           <div className="flex gap-3">
             <button onClick={exportCSV} className="btn-primary">
@@ -126,16 +139,17 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* Stage completion */}
+        {/* Scenario reach (position in randomized order) */}
         {stats && Object.keys(stats.stage_completion).length > 0 && (
-          <div className="bg-zinc-50 border border-zinc-200 rounded-xl p-6">
-            <h2 className="text-lg font-semibold mb-4">Stage Completion (Phase 3)</h2>
-            <div className="grid grid-cols-5 md:grid-cols-10 gap-2">
-              {STAGES.map((s) => (
-                <div key={s.number} className="text-center">
-                  <div className="text-2xl font-bold">{stats.stage_completion[s.number] || 0}</div>
-                  <div className="text-xs text-zinc-400">Stage {s.number}</div>
-                </div>
+          <div className="space-y-3">
+            <h2 className="text-lg font-semibold">Reached Scenario (by position in order)</h2>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+              {SCENARIOS.map((_, i) => (
+                <StatCard
+                  key={i}
+                  label={`Position ${i + 1}`}
+                  value={stats.stage_completion[i] || 0}
+                />
               ))}
             </div>
           </div>
@@ -155,6 +169,7 @@ export default function AdminPage() {
                 <th className="p-4">Phase</th>
                 <th className="p-4">Stage</th>
                 <th className="p-4">Started</th>
+                <th className="p-4">Completed</th>
                 <th className="p-4">Status</th>
                 <th className="p-4">Email</th>
                 <th className="p-4">Phone</th>
@@ -181,9 +196,29 @@ export default function AdminPage() {
                       <span className="text-zinc-400">No</span>
                     )}
                   </td>
-                  <td className="p-4">{p.current_phase}</td>
+                  <td className="p-4">{displayPhase(p.current_phase)}</td>
                   <td className="p-4">{p.current_stage}</td>
-                  <td className="p-4">{new Date(p.started_at).toLocaleDateString()}</td>
+                  <td className="p-4" title={new Date(p.started_at).toLocaleString()}>
+                    {new Date(p.started_at).toLocaleString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}
+                  </td>
+                  <td
+                    className="p-4"
+                    title={p.completed_at ? new Date(p.completed_at).toLocaleString() : undefined}
+                  >
+                    {p.completed_at
+                      ? new Date(p.completed_at).toLocaleString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })
+                      : "-"}
+                  </td>
                   <td className="p-4">
                     {p.completed_at ? (
                       <span className="text-green-600">Complete</span>
@@ -258,15 +293,24 @@ export default function AdminPage() {
                       </span>
                       <div className="flex-1 min-w-0">
                         <p className="text-zinc-700 text-xs leading-relaxed">
-                          {getCardText(r.phase, r.stage, r.card_number)}
+                          {getCardText(r.variant_code)}
                         </p>
-                        <div className="flex gap-3 mt-1 text-xs text-zinc-400">
+                        <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 text-xs text-zinc-400">
                           <span>
-                            P{r.phase}
-                            {r.stage > 0 ? `/S${r.stage}` : ""}/C{r.card_number}
+                            {r.variant_code ?? `P${r.phase}/S${r.stage}/C${r.card_number}`}
                           </span>
                           {r.response_time_ms && (
                             <span>{(r.response_time_ms / 1000).toFixed(1)}s</span>
+                          )}
+                          {r.created_at && (
+                            <span title={new Date(r.created_at).toLocaleString()}>
+                              {new Date(r.created_at).toLocaleString(undefined, {
+                                month: "short",
+                                day: "numeric",
+                                hour: "numeric",
+                                minute: "2-digit",
+                              })}
+                            </span>
                           )}
                         </div>
                       </div>

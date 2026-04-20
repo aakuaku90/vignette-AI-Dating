@@ -3,7 +3,12 @@ from sqlalchemy.orm import DeclarativeBase
 
 from .config import settings
 
-engine = create_async_engine(settings.database_url, echo=False)
+_is_remote = "localhost" not in settings.database_url and "127.0.0.1" not in settings.database_url
+engine = create_async_engine(
+    settings.database_url,
+    echo=False,
+    connect_args={"ssl": True} if _is_remote else {},
+)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 

@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "The Chase — AI Dating Research",
-  description: "A gamified research instrument exploring Gen Z attitudes toward AI in dating.",
+  title: "Swipe to Decide — AI Dating Research",
+  description: "A vignette instrument exploring Gen Z attitudes toward AI involvement in dating.",
 };
 
 export default function RootLayout({

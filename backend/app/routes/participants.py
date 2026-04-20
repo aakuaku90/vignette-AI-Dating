@@ -17,8 +17,11 @@ from ..schemas.schemas import (
     ParticipantDetail,
     ParticipantOut,
     ProgressUpdate,
+    ScenarioOrderUpdate,
     SwipeRequest,
     SwipeResponse,
+    WarmupUpdate,
+    DebriefUpdate,
 )
 
 router = APIRouter(prefix="/api", tags=["participants"])
@@ -66,6 +69,7 @@ async def record_swipe(session_code: str, data: SwipeRequest, db: AsyncSession =
         card_number=data.card_number,
         swiped_right=data.swiped_right,
         response_time_ms=data.response_time_ms,
+        variant_code=data.variant_code,
     )
     db.add(response)
     await db.commit()
@@ -105,7 +109,7 @@ async def update_progress(session_code: str, data: ProgressUpdate, db: AsyncSess
 
     participant.current_phase = data.current_phase
     participant.current_stage = data.current_stage
-    if data.current_phase > 3:
+    if data.current_phase >= 5:
         participant.completed_at = sqlfunc.now()
     await db.commit()
     await db.refresh(participant)
@@ -123,6 +127,63 @@ async def update_contact(session_code: str, data: ContactUpdate, db: AsyncSessio
         participant.email = data.email
     if data.phone is not None:
         participant.phone = data.phone
+    await db.commit()
+    await db.refresh(participant)
+    return participant
+
+
+@router.patch("/participants/{session_code}/warmup", response_model=ParticipantOut)
+async def update_warmup(session_code: str, data: WarmupUpdate, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Participant).where(Participant.session_code == session_code))
+    participant = result.scalar_one_or_none()
+    if not participant:
+        raise HTTPException(status_code=404, detail="Participant not found")
+
+    if data.warmup_w1 is not None:
+        participant.warmup_w1 = data.warmup_w1
+    if data.warmup_w2 is not None:
+        participant.warmup_w2 = data.warmup_w2
+    if data.warmup_w3 is not None:
+        participant.warmup_w3 = data.warmup_w3
+    if data.warmup_w4 is not None:
+        participant.warmup_w4 = data.warmup_w4
+    await db.commit()
+    await db.refresh(participant)
+    return participant
+
+
+@router.patch("/participants/{session_code}/debrief", response_model=ParticipantOut)
+async def update_debrief(session_code: str, data: DebriefUpdate, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Participant).where(Participant.session_code == session_code))
+    participant = result.scalar_one_or_none()
+    if not participant:
+        raise HTTPException(status_code=404, detail="Participant not found")
+
+    if data.debrief_d1 is not None:
+        participant.debrief_d1 = data.debrief_d1
+    if data.debrief_d2 is not None:
+        participant.debrief_d2 = data.debrief_d2
+    if data.debrief_d3 is not None:
+        participant.debrief_d3 = data.debrief_d3
+    if data.debrief_d4 is not None:
+        participant.debrief_d4 = data.debrief_d4
+    if data.debrief_d5 is not None:
+        participant.debrief_d5 = data.debrief_d5
+    if data.debrief_d6 is not None:
+        participant.debrief_d6 = data.debrief_d6
+    await db.commit()
+    await db.refresh(participant)
+    return participant
+
+
+@router.patch("/participants/{session_code}/scenario-order", response_model=ParticipantOut)
+async def update_scenario_order(session_code: str, data: ScenarioOrderUpdate, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Participant).where(Participant.session_code == session_code))
+    participant = result.scalar_one_or_none()
+    if not participant:
+        raise HTTPException(status_code=404, detail="Participant not found")
+
+    participant.scenario_order = data.scenario_order
     await db.commit()
     await db.refresh(participant)
     return participant
@@ -187,7 +248,7 @@ async def get_stats(_: None = Depends(require_admin), db: AsyncSession = Depends
 
     stage_result = await db.execute(
         select(Response.stage, sqlfunc.count(sqlfunc.distinct(Response.participant_id)))
-        .where(Response.phase == 3)
+        .where(Response.phase == 3, Response.stage <= 2, Response.variant_code.is_not(None))
         .group_by(Response.stage)
     )
     stage_completion = {row[0]: row[1] for row in stage_result.all()}
@@ -212,11 +273,23 @@ async def export_data(_: None = Depends(require_admin), db: AsyncSession = Depen
             Participant.state,
             Participant.email,
             Participant.phone,
+            Participant.warmup_w1,
+            Participant.warmup_w2,
+            Participant.warmup_w3,
+            Participant.warmup_w4,
+            Participant.debrief_d1,
+            Participant.debrief_d2,
+            Participant.debrief_d3,
+            Participant.debrief_d4,
+            Participant.debrief_d5,
+            Participant.debrief_d6,
+            Participant.scenario_order,
             Response.phase,
             Response.stage,
             Response.card_number,
             Response.swiped_right,
             Response.response_time_ms,
+            Response.variant_code,
             Response.created_at,
         )
         .join(Response, Response.participant_id == Participant.id)
@@ -232,12 +305,24 @@ async def export_data(_: None = Depends(require_admin), db: AsyncSession = Depen
             "state": r[4],
             "email": r[5],
             "phone": r[6],
-            "phase": r[7],
-            "stage": r[8],
-            "card_number": r[9],
-            "swiped_right": r[10],
-            "response_time_ms": r[11],
-            "created_at": r[12].isoformat() if r[12] else None,
+            "warmup_w1": r[7],
+            "warmup_w2": r[8],
+            "warmup_w3": r[9],
+            "warmup_w4": r[10],
+            "debrief_d1": r[11],
+            "debrief_d2": r[12],
+            "debrief_d3": r[13],
+            "debrief_d4": r[14],
+            "debrief_d5": r[15],
+            "debrief_d6": r[16],
+            "scenario_order": r[17],
+            "phase": r[18],
+            "stage": r[19],
+            "card_number": r[20],
+            "swiped_right": r[21],
+            "response_time_ms": r[22],
+            "variant_code": r[23],
+            "created_at": r[24].isoformat() if r[24] else None,
         }
         for r in rows
     ]

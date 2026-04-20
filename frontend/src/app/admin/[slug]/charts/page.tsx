@@ -3,9 +3,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { api } from "@/lib/api";
 import type { Participant } from "@/lib/api";
-
-const ADMIN_SLUG = process.env.NEXT_PUBLIC_ADMIN_SLUG || "r9k4x7m2b8f1n5p3q6w0t4v8";
-import { PHASE1_CARDS, STAGES } from "@/lib/instrument";
+import { SCENARIOS } from "@/lib/instrument";
 import {
   BarChart,
   Bar,
@@ -20,15 +18,12 @@ import {
   Legend,
   LineChart,
   Line,
-  RadarChart,
-  Radar,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis,
   AreaChart,
   Area,
   ReferenceLine,
 } from "recharts";
+
+const ADMIN_SLUG = process.env.NEXT_PUBLIC_ADMIN_SLUG || "r9k4x7m2b8f1n5p3q6w0t4v8";
 
 interface ExportRow {
   session_code: string;
@@ -36,17 +31,44 @@ interface ExportRow {
   gender: string | null;
   university: string | null;
   state: string | null;
+  warmup_w1: string | null;
+  warmup_w2: string | null;
+  warmup_w3: string | null;
+  warmup_w4: string | null;
+  scenario_order: string | null;
   phase: number;
   stage: number;
   card_number: number;
   swiped_right: boolean;
   response_time_ms: number | null;
+  variant_code: string | null;
   created_at: string | null;
 }
 
 const COLORS = ["#7c3aed", "#a78bfa", "#c4b5fd", "#ddd6fe", "#ede9fe", "#f5f3ff"];
 const ACCEPT_COLOR = "#22c55e";
 const REJECT_COLOR = "#ef4444";
+const SCENARIO_CODES = ["A", "B", "C"] as const;
+
+interface ParsedVariant {
+  scenario: "A" | "B" | "C";
+  pass: 1 | 2;
+  branch: "R" | "L" | null;
+  variant: 0 | 1 | 2 | 3;
+}
+
+function parseVariantCode(vc: string | null): ParsedVariant | null {
+  if (!vc) return null;
+  const [scen, kind] = vc.split("-");
+  if (!scen || !kind) return null;
+  if (!SCENARIO_CODES.includes(scen as "A" | "B" | "C")) return null;
+  const scenario = scen as "A" | "B" | "C";
+  if (kind === "base") return { scenario, pass: 1, branch: null, variant: 0 };
+  const branch = kind[0];
+  const variant = parseInt(kind.slice(1), 10);
+  if ((branch !== "R" && branch !== "L") || !(variant >= 1 && variant <= 3)) return null;
+  return { scenario, pass: 2, branch, variant: variant as 1 | 2 | 3 };
+}
 
 export default function ChartsPage() {
   const [participants, setParticipants] = useState<Participant[]>([]);
@@ -67,9 +89,17 @@ export default function ChartsPage() {
       });
   }, []);
 
-  // =============================================
+  const scenarioByCode = useMemo(() => {
+    const m: Record<string, (typeof SCENARIOS)[number]> = {};
+    SCENARIOS.forEach((s) => {
+      m[s.code] = s;
+    });
+    return m;
+  }, []);
+
+  // ============================================
   // DEMOGRAPHICS
-  // =============================================
+  // ============================================
 
   const genderData = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -105,11 +135,17 @@ export default function ChartsPage() {
   }, [participants]);
 
   const phaseDistribution = useMemo(() => {
-    const phases = ["Phase 0", "Phase 1", "Phase 2", "Phase 3", "Phase 4", "Complete"];
-    const counts = new Array(6).fill(0);
+    const phases = ["Start", "Phase 1", "Phase 2", "Phase 3", "Phase 4"];
+    const counts = new Array(5).fill(0);
+    const bucket = (internal: number) => {
+      if (internal <= 0) return 0;
+      if (internal <= 2) return 1;
+      if (internal === 3) return 2;
+      if (internal === 4) return 3;
+      return 4;
+    };
     participants.forEach((p) => {
-      const idx = Math.min(p.current_phase, 5);
-      counts[idx]++;
+      counts[bucket(p.current_phase)]++;
     });
     return phases.map((name, i) => ({ name, count: counts[i] }));
   }, [participants]);
@@ -125,137 +161,173 @@ export default function ChartsPage() {
       .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
   }, [participants]);
 
-  // =============================================
-  // PHASE 1: DATING HISTORY BASELINE
-  // =============================================
+  // ============================================
+  // PASS 1 BASELINE ACCEPTANCE (one swipe per scenario)
+  // ============================================
 
-  const phase1Acceptance = useMemo(() => {
-    return PHASE1_CARDS.map((card, i) => {
-      const responses = exportData.filter((r) => r.phase === 1 && r.card_number === i + 1);
+  const pass1Acceptance = useMemo(() => {
+    return SCENARIO_CODES.map((code) => {
+      const responses = exportData.filter((r) => r.variant_code === `${code}-base`);
       const accepted = responses.filter((r) => r.swiped_right).length;
       const total = responses.length;
+      const s = scenarioByCode[code];
       return {
-        name: `C${i + 1}`,
-        fullText: card.text,
-        accepted,
-        rejected: total - accepted,
-        rate: total > 0 ? Math.round((accepted / total) * 100) : 0,
-      };
-    });
-  }, [exportData]);
-
-  // =============================================
-  // PHASE 3: AI COMFORT TRAJECTORY
-  // =============================================
-
-  // Overall acceptance rate per stage (the key research metric)
-  const aiComfortTrajectory = useMemo(() => {
-    return STAGES.map((stage) => {
-      const responses = exportData.filter((r) => r.phase === 3 && r.stage === stage.number);
-      const accepted = responses.filter((r) => r.swiped_right).length;
-      const total = responses.length;
-      return {
-        name: `S${stage.number}`,
-        title: stage.title,
-        subtitle: stage.subtitle,
-        rate: total > 0 ? Math.round((accepted / total) * 100) : 0,
+        code,
+        name: `${code} · ${s?.title ?? ""}`,
+        title: s?.title ?? code,
+        subtitle: s?.subtitle ?? "",
+        exitFactor: s?.exitFactor ?? "",
         accepted,
         rejected: total - accepted,
         total,
+        rate: total > 0 ? Math.round((accepted / total) * 100) : 0,
       };
     });
-  }, [exportData]);
+  }, [exportData, scenarioByCode]);
 
-  // Per-stage card breakdowns
-  const stageCardBreakdowns = useMemo(() => {
-    return STAGES.map((stage) => {
-      const cards = stage.cards.map((card, i) => {
-        const responses = exportData.filter(
-          (r) => r.phase === 3 && r.stage === stage.number && r.card_number === i + 1
-        );
+  // ============================================
+  // PASS 2 COUNTER-PRESSURE (per scenario × branch × variant)
+  // ============================================
+
+  const pass2ByScenario = useMemo(() => {
+    return SCENARIO_CODES.map((code) => {
+      const s = scenarioByCode[code];
+      const rightPath = [1, 2, 3].map((v) => {
+        const vc = `${code}-R${v}`;
+        const responses = exportData.filter((r) => r.variant_code === vc);
         const accepted = responses.filter((r) => r.swiped_right).length;
         const total = responses.length;
         return {
-          name: `C${i + 1}`,
-          fullText: card.text,
+          variant: `R${v}`,
+          label: s?.right?.[v - 1]?.text ?? vc,
           accepted,
           rejected: total - accepted,
+          total,
           rate: total > 0 ? Math.round((accepted / total) * 100) : 0,
         };
       });
-      return { stage, cards };
-    });
-  }, [exportData]);
-
-  // =============================================
-  // RESEARCH INSIGHTS: COMFORT vs TRUST vs WILLINGNESS
-  // =============================================
-
-  // Card 8 in each stage is always the "willingness" question
-  // Cards about trust, comfort, and discomfort are tracked separately
-  const willingnessTrajectory = useMemo(() => {
-    return STAGES.map((stage) => {
-      // Card 8 = willingness to use/participate
-      const card8 = exportData.filter(
-        (r) => r.phase === 3 && r.stage === stage.number && r.card_number === 8
-      );
-      const accepted8 = card8.filter((r) => r.swiped_right).length;
-      const total8 = card8.length;
-
-      // Cards that express discomfort/concern (typically odd-numbered negative cards)
-      // Varies per stage, but generally cards with "uncomfortable", "intrusive", etc.
-      const allCards = exportData.filter(
-        (r) => r.phase === 3 && r.stage === stage.number
-      );
-      const allAccepted = allCards.filter((r) => r.swiped_right).length;
-      const allTotal = allCards.length;
-
+      const leftPath = [1, 2, 3].map((v) => {
+        const vc = `${code}-L${v}`;
+        const responses = exportData.filter((r) => r.variant_code === vc);
+        const accepted = responses.filter((r) => r.swiped_right).length;
+        const total = responses.length;
+        return {
+          variant: `L${v}`,
+          label: s?.left?.[v - 1]?.text ?? vc,
+          accepted,
+          rejected: total - accepted,
+          total,
+          rate: total > 0 ? Math.round((accepted / total) * 100) : 0,
+        };
+      });
       return {
-        name: `S${stage.number}`,
-        title: stage.title,
-        willingness: total8 > 0 ? Math.round((accepted8 / total8) * 100) : 0,
-        overall: allTotal > 0 ? Math.round((allAccepted / allTotal) * 100) : 0,
+        code,
+        title: s?.title ?? code,
+        subtitle: s?.subtitle ?? "",
+        rightPath,
+        leftPath,
       };
     });
-  }, [exportData]);
+  }, [exportData, scenarioByCode]);
 
-  // =============================================
-  // RESPONSE TIME ANALYSIS (Hesitation = Uncertainty)
-  // =============================================
+  // ============================================
+  // FLIP POINTS — where stance changes within a scenario
+  // ============================================
 
-  const responseTimeByStage = useMemo(() => {
-    return STAGES.map((stage) => {
-      const times = exportData
-        .filter((r) => r.phase === 3 && r.stage === stage.number && r.response_time_ms)
-        .map((r) => r.response_time_ms!);
-      const avg = times.length > 0 ? times.reduce((a, b) => a + b, 0) / times.length / 1000 : 0;
+  const flipPoints = useMemo(() => {
+    // For each (session, scenario): base direction, then 3 variant directions.
+    // A "flip" is the first variant where direction differs from base.
+    const sessions = new Map<string, Record<string, { base?: boolean; variants: (boolean | null)[] }>>();
+    exportData.forEach((r) => {
+      const parsed = parseVariantCode(r.variant_code);
+      if (!parsed) return;
+      const per = sessions.get(r.session_code) ?? {};
+      const rec = per[parsed.scenario] ?? { variants: [null, null, null] };
+      if (parsed.pass === 1) rec.base = r.swiped_right;
+      else rec.variants[parsed.variant - 1] = r.swiped_right;
+      per[parsed.scenario] = rec;
+      sessions.set(r.session_code, per);
+    });
 
-      // Split by accept vs reject
-      const acceptTimes = exportData
-        .filter((r) => r.phase === 3 && r.stage === stage.number && r.response_time_ms && r.swiped_right)
-        .map((r) => r.response_time_ms!);
-      const rejectTimes = exportData
-        .filter((r) => r.phase === 3 && r.stage === stage.number && r.response_time_ms && !r.swiped_right)
-        .map((r) => r.response_time_ms!);
+    return SCENARIO_CODES.map((code) => {
+      const s = scenarioByCode[code];
+      let baseRightCount = 0;
+      let baseLeftCount = 0;
+      const rightFlipAt = [0, 0, 0]; // base-right participants who flipped to left at R1/R2/R3
+      const leftFlipAt = [0, 0, 0]; // base-left participants who flipped to right at L1/L2/L3
 
-      const avgAccept = acceptTimes.length > 0 ? acceptTimes.reduce((a, b) => a + b, 0) / acceptTimes.length / 1000 : 0;
-      const avgReject = rejectTimes.length > 0 ? rejectTimes.reduce((a, b) => a + b, 0) / rejectTimes.length / 1000 : 0;
+      sessions.forEach((perScenario) => {
+        const rec = perScenario[code];
+        if (!rec || rec.base === undefined) return;
+        if (rec.base) {
+          baseRightCount++;
+          for (let i = 0; i < 3; i++) {
+            if (rec.variants[i] === false) {
+              rightFlipAt[i]++;
+              break;
+            }
+          }
+        } else {
+          baseLeftCount++;
+          for (let i = 0; i < 3; i++) {
+            if (rec.variants[i] === true) {
+              leftFlipAt[i]++;
+              break;
+            }
+          }
+        }
+      });
 
       return {
-        name: `S${stage.number}`,
-        title: stage.title,
-        avg: parseFloat(avg.toFixed(1)),
-        acceptTime: parseFloat(avgAccept.toFixed(1)),
-        rejectTime: parseFloat(avgReject.toFixed(1)),
+        code,
+        title: s?.title ?? code,
+        baseRightCount,
+        baseLeftCount,
+        rightFlipData: [1, 2, 3].map((v, i) => ({
+          variant: `R${v}`,
+          flipped: rightFlipAt[i],
+          rate: baseRightCount > 0 ? Math.round((rightFlipAt[i] / baseRightCount) * 100) : 0,
+        })),
+        leftFlipData: [1, 2, 3].map((v, i) => ({
+          variant: `L${v}`,
+          flipped: leftFlipAt[i],
+          rate: baseLeftCount > 0 ? Math.round((leftFlipAt[i] / baseLeftCount) * 100) : 0,
+        })),
       };
     });
-  }, [exportData]);
+  }, [exportData, scenarioByCode]);
 
-  // =============================================
-  // GENDER COMPARISON
-  // =============================================
+  // ============================================
+  // RESPONSE TIME — Pass 1 vs Pass 2, per scenario
+  // ============================================
 
-  const genderByStage = useMemo(() => {
+  const responseTimes = useMemo(() => {
+    const bucket = (rows: ExportRow[]) => {
+      const times = rows.filter((r) => r.response_time_ms).map((r) => r.response_time_ms!);
+      if (times.length === 0) return 0;
+      return parseFloat((times.reduce((a, b) => a + b, 0) / times.length / 1000).toFixed(1));
+    };
+    return SCENARIO_CODES.map((code) => {
+      const allRows = exportData.filter((r) => {
+        const p = parseVariantCode(r.variant_code);
+        return p?.scenario === code;
+      });
+      const pass1 = allRows.filter((r) => parseVariantCode(r.variant_code)?.pass === 1);
+      const pass2 = allRows.filter((r) => parseVariantCode(r.variant_code)?.pass === 2);
+      return {
+        name: code,
+        title: scenarioByCode[code]?.title ?? code,
+        "Pass 1": bucket(pass1),
+        "Pass 2": bucket(pass2),
+      };
+    });
+  }, [exportData, scenarioByCode]);
+
+  // ============================================
+  // GENDER COMPARISON — acceptance per scenario by gender
+  // ============================================
+
+  const genderByScenario = useMemo(() => {
     const genders = ["Male", "Female"];
     const sessionGender: Record<string, string> = {};
     participants.forEach((p) => {
@@ -263,140 +335,56 @@ export default function ChartsPage() {
         sessionGender[p.session_code] = p.gender;
       }
     });
-
-    return STAGES.map((stage) => {
-      const result: Record<string, number> = { name: 0 };
+    return SCENARIO_CODES.map((code) => {
+      const row: { name: string; title: string; Male: number; Female: number } = {
+        name: code,
+        title: scenarioByCode[code]?.title ?? code,
+        Male: 0,
+        Female: 0,
+      };
       genders.forEach((g) => {
-        const responses = exportData.filter(
-          (r) => r.phase === 3 && r.stage === stage.number && sessionGender[r.session_code] === g
-        );
+        const responses = exportData.filter((r) => {
+          const p = parseVariantCode(r.variant_code);
+          return p?.scenario === code && sessionGender[r.session_code] === g;
+        });
         const accepted = responses.filter((r) => r.swiped_right).length;
         const total = responses.length;
-        result[g] = total > 0 ? Math.round((accepted / total) * 100) : 0;
+        (row as unknown as Record<string, number>)[g] =
+          total > 0 ? Math.round((accepted / total) * 100) : 0;
       });
-      return {
-        name: `S${stage.number}`,
-        title: stage.title,
-        Male: result["Male"] || 0,
-        Female: result["Female"] || 0,
-      };
+      return row;
     });
-  }, [exportData, participants]);
+  }, [exportData, participants, scenarioByCode]);
 
-  // =============================================
-  // DROPOUT ANALYSIS
-  // =============================================
+  // ============================================
+  // WARMUP INSIGHTS
+  // ============================================
 
-  const dropoffData = useMemo(() => {
-    const stages = STAGES.map((stage) => {
-      const uniqueParticipants = new Set(
-        exportData.filter((r) => r.phase === 3 && r.stage === stage.number).map((r) => r.session_code)
-      );
-      return {
-        name: `S${stage.number}`,
-        title: stage.title,
-        participants: uniqueParticipants.size,
-      };
+  const warmupTopCounts = (field: "warmup_w1" | "warmup_w2" | "warmup_w3" | "warmup_w4", limit = 12) => {
+    const counts: Record<string, number> = {};
+    const seen = new Set<string>();
+    exportData.forEach((r) => {
+      const raw = (r[field] || "").trim();
+      if (!raw || seen.has(r.session_code + "|" + field)) return;
+      seen.add(r.session_code + "|" + field);
+      raw
+        .split(",")
+        .map((p) => p.trim())
+        .filter(Boolean)
+        .forEach((tok) => {
+          counts[tok] = (counts[tok] || 0) + 1;
+        });
     });
-    return stages;
-  }, [exportData]);
+    return Object.entries(counts)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, limit);
+  };
 
-  // =============================================
-  // RADAR: STAGE COMFORT DIMENSIONS
-  // =============================================
-
-  const radarData = useMemo(() => {
-    return STAGES.map((stage) => {
-      const responses = exportData.filter((r) => r.phase === 3 && r.stage === stage.number);
-      const accepted = responses.filter((r) => r.swiped_right).length;
-      const total = responses.length;
-      return {
-        subject: stage.title.length > 20 ? stage.title.slice(0, 18) + "..." : stage.title,
-        acceptance: total > 0 ? Math.round((accepted / total) * 100) : 0,
-      };
-    });
-  }, [exportData]);
-
-  // =============================================
-  // PHASE 1 → PHASE 3 CORRELATION
-  // =============================================
-
-  const baselineCorrelation = useMemo(() => {
-    // For each participant, compute Phase 1 acceptance rate and Phase 3 acceptance rate
-    const sessionCodes = new Set(exportData.map((r) => r.session_code));
-    const points: { p1Rate: number; p3Rate: number; code: string }[] = [];
-
-    sessionCodes.forEach((code) => {
-      const p1 = exportData.filter((r) => r.session_code === code && r.phase === 1);
-      const p3 = exportData.filter((r) => r.session_code === code && r.phase === 3);
-      if (p1.length === 0 || p3.length === 0) return;
-
-      const p1Accept = p1.filter((r) => r.swiped_right).length;
-      const p3Accept = p3.filter((r) => r.swiped_right).length;
-
-      points.push({
-        code,
-        p1Rate: Math.round((p1Accept / p1.length) * 100),
-        p3Rate: Math.round((p3Accept / p3.length) * 100),
-      });
-    });
-
-    // Bucket by Phase 1 rate for visualization
-    const buckets: Record<string, { total: number; sum: number }> = {
-      "0-20%": { total: 0, sum: 0 },
-      "21-40%": { total: 0, sum: 0 },
-      "41-60%": { total: 0, sum: 0 },
-      "61-80%": { total: 0, sum: 0 },
-      "81-100%": { total: 0, sum: 0 },
-    };
-    points.forEach(({ p1Rate, p3Rate }) => {
-      const bucket =
-        p1Rate <= 20 ? "0-20%" :
-        p1Rate <= 40 ? "21-40%" :
-        p1Rate <= 60 ? "41-60%" :
-        p1Rate <= 80 ? "61-80%" : "81-100%";
-      buckets[bucket].total++;
-      buckets[bucket].sum += p3Rate;
-    });
-
-    return Object.entries(buckets).map(([name, { total, sum }]) => ({
-      name,
-      avgP3Rate: total > 0 ? Math.round(sum / total) : 0,
-      count: total,
-    }));
-  }, [exportData]);
-
-  // =============================================
-  // KEY THRESHOLD CARDS
-  // =============================================
-
-  const thresholdCards = useMemo(() => {
-    // Cards that represent key ethical/comfort boundaries
-    const keyCards = [
-      { stage: 1, card: 3, label: "Comfort with unseen AI profile" },
-      { stage: 2, card: 3, label: "Safety without seeing photo" },
-      { stage: 4, card: 3, label: "Comfort with AI clone of self" },
-      { stage: 6, card: 4, label: "OK with secret AI coaching" },
-      { stage: 7, card: 2, label: "OK with AI impersonation" },
-      { stage: 7, card: 4, label: "AI acting = autonomy violation" },
-      { stage: 8, card: 6, label: "Discomfort: data as training" },
-      { stage: 10, card: 5, label: "Platforms must disclose AI" },
-    ];
-
-    return keyCards.map(({ stage, card, label }) => {
-      const responses = exportData.filter(
-        (r) => r.phase === 3 && r.stage === stage && r.card_number === card
-      );
-      const accepted = responses.filter((r) => r.swiped_right).length;
-      const total = responses.length;
-      return {
-        label,
-        stage: `S${stage}`,
-        rate: total > 0 ? Math.round((accepted / total) * 100) : 0,
-        total,
-      };
-    });
-  }, [exportData]);
+  const warmupApps = useMemo(() => warmupTopCounts("warmup_w1", 15), [exportData]);
+  const warmupFrequency = useMemo(() => warmupTopCounts("warmup_w2", 10), [exportData]);
+  const warmupExit = useMemo(() => warmupTopCounts("warmup_w3", 12), [exportData]);
+  const warmupReflection = useMemo(() => warmupTopCounts("warmup_w4", 12), [exportData]);
 
   if (loading) {
     return (
@@ -405,7 +393,6 @@ export default function ChartsPage() {
       </div>
     );
   }
-
   if (error) {
     return (
       <div className="min-h-[100dvh] flex items-center justify-center">
@@ -420,16 +407,16 @@ export default function ChartsPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-bold">Charts & Analytics</h1>
-            <p className="text-zinc-400 text-sm">The Chase · Research Analysis</p>
+            <p className="text-zinc-400 text-sm">
+              Swipe to Decide · Pass 1 baseline and Pass 2 counter-pressure
+            </p>
           </div>
           <a href={`/admin/${ADMIN_SLUG}`} className="btn-secondary inline-block">
             Back to Dashboard
           </a>
         </div>
 
-        {/* ============================================ */}
         {/* SECTION 1: PARTICIPANT DEMOGRAPHICS */}
-        {/* ============================================ */}
         <SectionHeader
           title="Participant Demographics"
           description="Who participated in the study."
@@ -525,105 +512,90 @@ export default function ChartsPage() {
           )}
         </ChartCard>
 
-        {/* ============================================ */}
-        {/* SECTION 2: DATING HISTORY BASELINE (PHASE 1) */}
-        {/* ============================================ */}
+        {/* SECTION 2: WARMUP INSIGHTS */}
         <SectionHeader
-          title="Phase 1: Dating History Baseline"
-          description="Participants' existing relationship with dating apps before AI exposure. This establishes the baseline frustration, openness, and prior experience."
+          title="Warmup Responses"
+          description="Self-reported dating-app history captured before the swipe experiment (W1–W4)."
         />
-
-        <ChartCard title="Phase 1 Card Responses: Accept vs Reject">
-          <ResponsiveContainer width="100%" height={350}>
-            <BarChart data={phase1Acceptance}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
-              <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-              <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-              <Tooltip
-                content={({ active, payload }) => {
-                  if (!active || !payload?.length) return null;
-                  const d = payload[0].payload;
-                  return (
-                    <div className="bg-white border border-zinc-200 rounded-lg p-3 shadow-lg text-sm max-w-sm">
-                      <p className="font-medium text-zinc-700 mb-1">{d.fullText}</p>
-                      <p className="text-green-600">Agreed: {d.accepted}</p>
-                      <p className="text-red-500">Disagreed: {d.rejected}</p>
-                      <p className="text-zinc-400">Agreement: {d.rate}%</p>
-                    </div>
-                  );
-                }}
-              />
-              <Legend />
-              <Bar dataKey="accepted" name="Agreed" fill={ACCEPT_COLOR} stackId="a" />
-              <Bar dataKey="rejected" name="Disagreed" fill={REJECT_COLOR} stackId="a" radius={[6, 6, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
-
-        {/* ============================================ */}
-        {/* SECTION 3: AI COMFORT TRAJECTORY (PHASE 3) */}
-        {/* ============================================ */}
-        <SectionHeader
-          title="Phase 3: AI Comfort Trajectory"
-          description="How acceptance changes as AI involvement escalates from voice profiling (S1) to AI impersonation detection (S10). The central research question."
-        />
-
-        <ChartCard title="Acceptance Rate Across Escalating AI Involvement">
-          <ResponsiveContainer width="100%" height={350}>
-            <AreaChart data={aiComfortTrajectory}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
-              <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-              <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} unit="%" />
-              <Tooltip
-                content={({ active, payload }) => {
-                  if (!active || !payload?.length) return null;
-                  const d = payload[0].payload;
-                  return (
-                    <div className="bg-white border border-zinc-200 rounded-lg p-3 shadow-lg text-sm">
-                      <p className="font-semibold text-zinc-700">{d.title}</p>
-                      <p className="text-zinc-400 text-xs mb-1">{d.subtitle}</p>
-                      <p className="text-purple-600 font-medium">{d.rate}% acceptance</p>
-                      <p className="text-zinc-400">{d.accepted} / {d.total} responses</p>
-                    </div>
-                  );
-                }}
-              />
-              <ReferenceLine y={50} stroke="#a1a1aa" strokeDasharray="4 4" label={{ value: "50%", position: "right", fontSize: 11, fill: "#a1a1aa" }} />
-              <Area type="monotone" dataKey="rate" stroke="#7c3aed" fill="#ede9fe" strokeWidth={2.5} dot={{ fill: "#7c3aed", r: 5 }} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </ChartCard>
-
-        <ChartCard title="Willingness to Use (Card 8) vs Overall Acceptance Per Stage">
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={willingnessTrajectory}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
-              <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-              <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} unit="%" />
-              <Tooltip
-                content={({ active, payload }) => {
-                  if (!active || !payload?.length) return null;
-                  const d = payload[0].payload;
-                  return (
-                    <div className="bg-white border border-zinc-200 rounded-lg p-3 shadow-lg text-sm">
-                      <p className="font-semibold text-zinc-700">{d.title}</p>
-                      <p className="text-purple-600">Willingness (C8): {d.willingness}%</p>
-                      <p className="text-blue-500">Overall acceptance: {d.overall}%</p>
-                    </div>
-                  );
-                }}
-              />
-              <Legend />
-              <Line type="monotone" dataKey="willingness" name="Willingness (Card 8)" stroke="#7c3aed" strokeWidth={2.5} dot={{ r: 5 }} />
-              <Line type="monotone" dataKey="overall" name="Overall Acceptance" stroke="#3b82f6" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 4 }} />
-            </LineChart>
-          </ResponsiveContainer>
-        </ChartCard>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <ChartCard title="Stage Acceptance: Accept vs Reject Volume">
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={aiComfortTrajectory}>
+          <ChartCard title="W1 · Apps used (most mentioned)">
+            {warmupApps.length > 0 ? (
+              <ResponsiveContainer width="100%" height={Math.max(220, warmupApps.length * 22)}>
+                <BarChart data={warmupApps} layout="vertical">
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                  <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={130} />
+                  <Tooltip />
+                  <Bar dataKey="value" fill="#7c3aed" radius={[0, 6, 6, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <EmptyState />
+            )}
+          </ChartCard>
+
+          <ChartCard title="W2 · Frequency of use">
+            {warmupFrequency.length > 0 ? (
+              <ResponsiveContainer width="100%" height={Math.max(220, warmupFrequency.length * 22)}>
+                <BarChart data={warmupFrequency} layout="vertical">
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                  <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={130} />
+                  <Tooltip />
+                  <Bar dataKey="value" fill="#a78bfa" radius={[0, 6, 6, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <EmptyState />
+            )}
+          </ChartCard>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <ChartCard title="W3 · What drove them to delete">
+            {warmupExit.length > 0 ? (
+              <ResponsiveContainer width="100%" height={Math.max(220, warmupExit.length * 22)}>
+                <BarChart data={warmupExit} layout="vertical">
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                  <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={160} />
+                  <Tooltip />
+                  <Bar dataKey="value" fill={REJECT_COLOR} radius={[0, 6, 6, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <EmptyState />
+            )}
+          </ChartCard>
+
+          <ChartCard title="W4 · What they wish worked differently">
+            {warmupReflection.length > 0 ? (
+              <ResponsiveContainer width="100%" height={Math.max(220, warmupReflection.length * 22)}>
+                <BarChart data={warmupReflection} layout="vertical">
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                  <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={160} />
+                  <Tooltip />
+                  <Bar dataKey="value" fill="#a78bfa" radius={[0, 6, 6, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <EmptyState />
+            )}
+          </ChartCard>
+        </div>
+
+        {/* SECTION 3: PASS 1 BASELINE */}
+        <SectionHeader
+          title="Pass 1 · Baseline Acceptance"
+          description="One swipe per scenario (A, B, C). The initial gut reaction before counter-pressure."
+        />
+
+        <ChartCard title="Base prompt acceptance by scenario">
+          {pass1Acceptance.some((r) => r.total > 0) ? (
+            <ResponsiveContainer width="100%" height={320}>
+              <BarChart data={pass1Acceptance}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
                 <XAxis dataKey="name" tick={{ fontSize: 12 }} />
                 <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
@@ -632,78 +604,174 @@ export default function ChartsPage() {
                     if (!active || !payload?.length) return null;
                     const d = payload[0].payload;
                     return (
-                      <div className="bg-white border border-zinc-200 rounded-lg p-3 shadow-lg text-sm">
+                      <div className="bg-white border border-zinc-200 rounded-lg p-3 shadow-lg text-sm max-w-sm">
                         <p className="font-semibold text-zinc-700">{d.title}</p>
+                        <p className="text-zinc-400 text-xs mb-1">{d.subtitle}</p>
+                        <p className="text-zinc-500 text-xs mb-2">Exit factor: {d.exitFactor}</p>
                         <p className="text-green-600">Accepted: {d.accepted}</p>
                         <p className="text-red-500">Rejected: {d.rejected}</p>
+                        <p className="text-purple-600 font-medium">Rate: {d.rate}%</p>
                       </div>
                     );
                   }}
                 />
                 <Legend />
-                <Bar dataKey="accepted" name="Accepted" fill={ACCEPT_COLOR} stackId="a" />
-                <Bar dataKey="rejected" name="Rejected" fill={REJECT_COLOR} stackId="a" radius={[6, 6, 0, 0]} />
+                <Bar dataKey="accepted" name="Right (would use)" fill={ACCEPT_COLOR} stackId="a" />
+                <Bar dataKey="rejected" name="Left (would not)" fill={REJECT_COLOR} stackId="a" radius={[6, 6, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
-          </ChartCard>
-
-          <ChartCard title="AI Comfort Radar">
-            <ResponsiveContainer width="100%" height={300}>
-              <RadarChart data={radarData}>
-                <PolarGrid stroke="#e4e4e7" />
-                <PolarAngleAxis dataKey="subject" tick={{ fontSize: 10 }} />
-                <PolarRadiusAxis domain={[0, 100]} tick={{ fontSize: 10 }} />
-                <Radar name="Acceptance %" dataKey="acceptance" stroke="#7c3aed" fill="#ede9fe" fillOpacity={0.5} />
-              </RadarChart>
-            </ResponsiveContainer>
-          </ChartCard>
-        </div>
-
-        {/* ============================================ */}
-        {/* SECTION 4: KEY ETHICAL THRESHOLD CARDS */}
-        {/* ============================================ */}
-        <SectionHeader
-          title="Ethical Threshold Analysis"
-          description="Specific cards that probe key ethical boundaries: consent, transparency, autonomy, and comfort with AI deception."
-        />
-
-        <ChartCard title="Key Boundary Cards: Agreement Rate">
-          <ResponsiveContainer width="100%" height={350}>
-            <BarChart data={thresholdCards} layout="vertical">
-              <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
-              <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 12 }} unit="%" />
-              <YAxis type="category" dataKey="label" tick={{ fontSize: 11 }} width={200} />
-              <Tooltip
-                content={({ active, payload }) => {
-                  if (!active || !payload?.length) return null;
-                  const d = payload[0].payload;
-                  return (
-                    <div className="bg-white border border-zinc-200 rounded-lg p-3 shadow-lg text-sm">
-                      <p className="font-medium text-zinc-700">{d.label}</p>
-                      <p className="text-zinc-400">{d.stage}</p>
-                      <p className="text-purple-600 font-medium">{d.rate}% agreed</p>
-                      <p className="text-zinc-400">{d.total} responses</p>
-                    </div>
-                  );
-                }}
-              />
-              <ReferenceLine x={50} stroke="#a1a1aa" strokeDasharray="4 4" />
-              <Bar dataKey="rate" fill="#7c3aed" radius={[0, 6, 6, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
+          ) : (
+            <EmptyState />
+          )}
         </ChartCard>
 
-        {/* ============================================ */}
-        {/* SECTION 5: HESITATION ANALYSIS */}
-        {/* ============================================ */}
+        {/* SECTION 4: PASS 2 COUNTER-PRESSURE */}
         <SectionHeader
-          title="Hesitation Analysis"
-          description="Response time as a proxy for uncertainty. Longer response times suggest greater internal conflict. Compared between accept and reject decisions."
+          title="Pass 2 · Counter-Pressure"
+          description="Right-swipe paths add escalating friction; left-swipe paths add softening. Shown per scenario."
         />
 
-        <ChartCard title="Avg Response Time: Accept vs Reject (seconds)">
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={responseTimeByStage}>
+        {pass2ByScenario.map((sc) => (
+          <ChartCard key={sc.code} title={`Scenario ${sc.code} · ${sc.title}`}>
+            <p className="text-xs text-zinc-400 -mt-2 mb-4">{sc.subtitle}</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <p className="text-sm font-medium text-zinc-600 mb-2">
+                  Right-path (escalating friction)
+                </p>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={sc.rightPath}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                    <XAxis dataKey="variant" tick={{ fontSize: 12 }} />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} unit="%" />
+                    <Tooltip
+                      content={({ active, payload }) => {
+                        if (!active || !payload?.length) return null;
+                        const d = payload[0].payload;
+                        return (
+                          <div className="bg-white border border-zinc-200 rounded-lg p-3 shadow-lg text-sm max-w-sm">
+                            <p className="font-medium text-zinc-700 mb-1">{d.label}</p>
+                            <p className="text-green-600">Accepted: {d.accepted}</p>
+                            <p className="text-red-500">Rejected: {d.rejected}</p>
+                            <p className="text-purple-600">Rate: {d.rate}%</p>
+                          </div>
+                        );
+                      }}
+                    />
+                    <ReferenceLine y={50} stroke="#a1a1aa" strokeDasharray="4 4" />
+                    <Bar dataKey="rate" fill="#7c3aed" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-zinc-600 mb-2">
+                  Left-path (softening)
+                </p>
+                <ResponsiveContainer width="100%" height={220}>
+                  <BarChart data={sc.leftPath}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                    <XAxis dataKey="variant" tick={{ fontSize: 12 }} />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} unit="%" />
+                    <Tooltip
+                      content={({ active, payload }) => {
+                        if (!active || !payload?.length) return null;
+                        const d = payload[0].payload;
+                        return (
+                          <div className="bg-white border border-zinc-200 rounded-lg p-3 shadow-lg text-sm max-w-sm">
+                            <p className="font-medium text-zinc-700 mb-1">{d.label}</p>
+                            <p className="text-green-600">Accepted: {d.accepted}</p>
+                            <p className="text-red-500">Rejected: {d.rejected}</p>
+                            <p className="text-purple-600">Rate: {d.rate}%</p>
+                          </div>
+                        );
+                      }}
+                    />
+                    <ReferenceLine y={50} stroke="#a1a1aa" strokeDasharray="4 4" />
+                    <Bar dataKey="rate" fill="#a78bfa" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </ChartCard>
+        ))}
+
+        {/* SECTION 5: FLIP POINTS */}
+        <SectionHeader
+          title="Flip Points"
+          description="The first Pass 2 variant where a participant switched stance. Right-path flips measure how fragile initial acceptance is; left-path flips measure how softenable initial rejection is."
+        />
+
+        {flipPoints.map((fp) => (
+          <ChartCard key={fp.code} title={`Scenario ${fp.code} · ${fp.title}`}>
+            <p className="text-xs text-zinc-400 -mt-2 mb-4">
+              Base-right: {fp.baseRightCount} · Base-left: {fp.baseLeftCount}
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <p className="text-sm font-medium text-zinc-600 mb-2">
+                  Right → Left flips (acceptance broke)
+                </p>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={fp.rightFlipData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                    <XAxis dataKey="variant" tick={{ fontSize: 12 }} />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} unit="%" />
+                    <Tooltip
+                      content={({ active, payload }) => {
+                        if (!active || !payload?.length) return null;
+                        const d = payload[0].payload;
+                        return (
+                          <div className="bg-white border border-zinc-200 rounded-lg p-3 shadow-lg text-sm">
+                            <p className="font-medium text-zinc-700">{d.variant}</p>
+                            <p className="text-red-500">Flipped: {d.flipped}</p>
+                            <p className="text-purple-600">Rate: {d.rate}%</p>
+                          </div>
+                        );
+                      }}
+                    />
+                    <Bar dataKey="rate" fill={REJECT_COLOR} radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-zinc-600 mb-2">
+                  Left → Right flips (rejection softened)
+                </p>
+                <ResponsiveContainer width="100%" height={200}>
+                  <BarChart data={fp.leftFlipData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
+                    <XAxis dataKey="variant" tick={{ fontSize: 12 }} />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} unit="%" />
+                    <Tooltip
+                      content={({ active, payload }) => {
+                        if (!active || !payload?.length) return null;
+                        const d = payload[0].payload;
+                        return (
+                          <div className="bg-white border border-zinc-200 rounded-lg p-3 shadow-lg text-sm">
+                            <p className="font-medium text-zinc-700">{d.variant}</p>
+                            <p className="text-green-600">Flipped: {d.flipped}</p>
+                            <p className="text-purple-600">Rate: {d.rate}%</p>
+                          </div>
+                        );
+                      }}
+                    />
+                    <Bar dataKey="rate" fill={ACCEPT_COLOR} radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </ChartCard>
+        ))}
+
+        {/* SECTION 6: RESPONSE TIME */}
+        <SectionHeader
+          title="Response Time (Hesitation)"
+          description="Average time-to-swipe per scenario, split by pass. Longer times suggest internal conflict; Pass 2 is typically slower than Pass 1."
+        />
+
+        <ChartCard title="Average seconds to swipe · Pass 1 vs Pass 2">
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={responseTimes}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
               <XAxis dataKey="name" tick={{ fontSize: 12 }} />
               <YAxis tick={{ fontSize: 12 }} unit="s" />
@@ -714,31 +782,28 @@ export default function ChartsPage() {
                   return (
                     <div className="bg-white border border-zinc-200 rounded-lg p-3 shadow-lg text-sm">
                       <p className="font-semibold text-zinc-700">{d.title}</p>
-                      <p className="text-green-600">Accept avg: {d.acceptTime}s</p>
-                      <p className="text-red-500">Reject avg: {d.rejectTime}s</p>
-                      <p className="text-zinc-400">Overall avg: {d.avg}s</p>
+                      <p className="text-purple-600">Pass 1 avg: {d["Pass 1"]}s</p>
+                      <p className="text-blue-500">Pass 2 avg: {d["Pass 2"]}s</p>
                     </div>
                   );
                 }}
               />
               <Legend />
-              <Bar dataKey="acceptTime" name="Accept Avg" fill={ACCEPT_COLOR} radius={[6, 6, 0, 0]} />
-              <Bar dataKey="rejectTime" name="Reject Avg" fill={REJECT_COLOR} radius={[6, 6, 0, 0]} />
+              <Bar dataKey="Pass 1" fill="#7c3aed" radius={[6, 6, 0, 0]} />
+              <Bar dataKey="Pass 2" fill="#3b82f6" radius={[6, 6, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
 
-        {/* ============================================ */}
-        {/* SECTION 6: GENDER COMPARISON */}
-        {/* ============================================ */}
+        {/* SECTION 7: GENDER COMPARISON */}
         <SectionHeader
           title="Gender Comparison"
-          description="How acceptance rates differ between male and female participants across escalating AI involvement."
+          description="Overall acceptance rate per scenario, split by participant gender."
         />
 
-        <ChartCard title="Acceptance Rate by Gender Across Stages">
-          <ResponsiveContainer width="100%" height={300}>
-            <LineChart data={genderByStage}>
+        <ChartCard title="Acceptance by scenario (Male vs Female)">
+          <ResponsiveContainer width="100%" height={280}>
+            <LineChart data={genderByScenario}>
               <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
               <XAxis dataKey="name" tick={{ fontSize: 12 }} />
               <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} unit="%" />
@@ -761,108 +826,6 @@ export default function ChartsPage() {
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
-
-        {/* ============================================ */}
-        {/* SECTION 7: BASELINE CORRELATION */}
-        {/* ============================================ */}
-        <SectionHeader
-          title="Baseline → AI Acceptance Correlation"
-          description="Does a participant's existing dating frustration (Phase 1) predict their openness to AI involvement (Phase 3)?"
-        />
-
-        <ChartCard title="Phase 1 Agreement Rate vs Phase 3 Avg Acceptance">
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={baselineCorrelation}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
-              <XAxis dataKey="name" tick={{ fontSize: 12 }} label={{ value: "Phase 1 Agreement Rate", position: "bottom", offset: -5, fontSize: 11 }} />
-              <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} unit="%" label={{ value: "Avg Phase 3 Acceptance", angle: -90, position: "insideLeft", fontSize: 11 }} />
-              <Tooltip
-                content={({ active, payload }) => {
-                  if (!active || !payload?.length) return null;
-                  const d = payload[0].payload;
-                  return (
-                    <div className="bg-white border border-zinc-200 rounded-lg p-3 shadow-lg text-sm">
-                      <p className="font-medium text-zinc-700">P1 Rate: {d.name}</p>
-                      <p className="text-purple-600">Avg P3 Acceptance: {d.avgP3Rate}%</p>
-                      <p className="text-zinc-400">{d.count} participants</p>
-                    </div>
-                  );
-                }}
-              />
-              <Bar dataKey="avgP3Rate" fill="#7c3aed" radius={[6, 6, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
-
-        {/* ============================================ */}
-        {/* SECTION 8: PARTICIPANT RETENTION */}
-        {/* ============================================ */}
-        <SectionHeader
-          title="Participant Retention"
-          description="Dropoff across stages. Where participants stop engaging may indicate where AI involvement becomes unacceptable."
-        />
-
-        <ChartCard title="Unique Participants Per Stage">
-          <ResponsiveContainer width="100%" height={300}>
-            <AreaChart data={dropoffData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
-              <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-              <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-              <Tooltip
-                content={({ active, payload }) => {
-                  if (!active || !payload?.length) return null;
-                  const d = payload[0].payload;
-                  return (
-                    <div className="bg-white border border-zinc-200 rounded-lg p-3 shadow-lg text-sm">
-                      <p className="font-semibold text-zinc-700">{d.title}</p>
-                      <p className="text-purple-600">{d.participants} participants</p>
-                    </div>
-                  );
-                }}
-              />
-              <Area type="monotone" dataKey="participants" stroke="#ef4444" fill="#fde2e2" strokeWidth={2} dot={{ fill: "#ef4444", r: 4 }} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </ChartCard>
-
-        {/* ============================================ */}
-        {/* SECTION 9: PER-STAGE CARD BREAKDOWN */}
-        {/* ============================================ */}
-        <SectionHeader
-          title="Per-Stage Card Breakdown"
-          description="Detailed accept/reject for every card in each stage. Hover for the full card text."
-        />
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {stageCardBreakdowns.map(({ stage, cards }) => (
-            <ChartCard key={stage.number} title={`Stage ${stage.number} · ${stage.title}`}>
-              <p className="text-xs text-zinc-400 -mt-2 mb-3">{stage.subtitle}</p>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={cards}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e4e4e7" />
-                  <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
-                  <Tooltip
-                    content={({ active, payload }) => {
-                      if (!active || !payload?.length) return null;
-                      const d = payload[0].payload;
-                      return (
-                        <div className="bg-white border border-zinc-200 rounded-lg p-3 shadow-lg text-sm max-w-sm">
-                          <p className="font-medium text-zinc-700 mb-1">{d.fullText}</p>
-                          <p className="text-green-600">Accepted: {d.accepted}</p>
-                          <p className="text-red-500">Rejected: {d.rejected}</p>
-                          <p className="text-zinc-400">Rate: {d.rate}%</p>
-                        </div>
-                      );
-                    }}
-                  />
-                  <Bar dataKey="accepted" name="Accepted" fill={ACCEPT_COLOR} stackId="a" />
-                  <Bar dataKey="rejected" name="Rejected" fill={REJECT_COLOR} stackId="a" radius={[6, 6, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </ChartCard>
-          ))}
-        </div>
       </div>
     </div>
   );

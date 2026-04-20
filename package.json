@@ -1,0 +1,16 @@
+{
+  "name": "vignette-ai-dating",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": ["frontend"],
+  "scripts": {
+    "dev": "npx --yes concurrently@9 -n server,client -c cyan,magenta \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:backend": "cd backend && source venv/bin/activate && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "concurrently": "^9.0.0",
+    "tailwindcss": "^4"
+  }
+}

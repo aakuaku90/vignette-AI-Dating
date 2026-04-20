@@ -15,9 +15,21 @@ interface SwipeCardProps {
   totalCards: number;
   onSwipe: (right: boolean, timeMs: number) => void;
   onBack?: () => void;
+  phaseLabel?: string;
+  scenarioTitle?: string;
+  scenarioSubtitle?: string;
 }
 
-export default function SwipeCard({ text, cardNumber, totalCards, onSwipe, onBack }: SwipeCardProps) {
+export default function SwipeCard({
+  text,
+  cardNumber,
+  totalCards,
+  onSwipe,
+  onBack,
+  phaseLabel,
+  scenarioTitle,
+  scenarioSubtitle,
+}: SwipeCardProps) {
   const x = useMotionValue(0);
   const rotate = useTransform(x, [-200, 200], [-15, 15]);
   const leftOpacity = useTransform(x, [-150, -50], [1, 0]);
@@ -131,8 +143,28 @@ export default function SwipeCard({ text, cardNumber, totalCards, onSwipe, onBac
               YES
             </motion.div>
 
+            {/* Phase label (top of card) */}
+            {phaseLabel && (
+              <div className="absolute top-5 left-0 right-0 text-center text-xs tracking-widest text-zinc-400 uppercase z-10">
+                {phaseLabel}
+              </div>
+            )}
+
             {/* Card text */}
-            <p className="text-xl sm:text-2xl text-center leading-relaxed px-2 relative z-10 text-zinc-700">{text}</p>
+            <p className="text-xl sm:text-2xl text-center leading-relaxed px-2 relative z-10 text-zinc-700">
+              {text}
+            </p>
+
+            {/* Instruction */}
+            <div className="absolute bottom-24 left-0 right-0 text-center text-xs sm:text-sm text-zinc-500 px-4 z-10">
+              <span className="text-red-500 font-medium">Swipe left</span>
+              {" / tap ✕ if you "}
+              <span className="font-medium">would not</span>
+              {" use this · "}
+              <span className="text-green-600 font-medium">Swipe right</span>
+              {" / tap ✓ if you "}
+              <span className="font-medium">would</span>
+            </div>
 
             {/* Buttons */}
             <div className="absolute bottom-5 left-0 right-0 flex items-center justify-center gap-8 z-10">

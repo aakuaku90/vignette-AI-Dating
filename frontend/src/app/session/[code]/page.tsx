@@ -1,25 +1,78 @@
 "use client";
 
-import { useEffect, useState, useCallback, use } from "react";
+import { useEffect, useState, useCallback, use, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import SwipeCard from "@/components/SwipeCard";
 import ComboBox from "@/components/ComboBox";
 import { api } from "@/lib/api";
 import { useSession } from "@/lib/store";
 import {
-  PHASE1_INTRO,
-  PHASE1_CARDS,
-  PHASE2_TEXT,
-  STAGES,
+  ONBOARDING_TEXT,
+  WARMUP_QUESTIONS,
+  SCENARIOS,
+  SCENARIO_BY_CODE,
+  TOTAL_SWIPES,
   DEBRIEF_QUESTIONS,
+  type Scenario,
 } from "@/lib/instrument";
+
+type Direction = "right" | "left";
+
+function shuffle<T>(arr: readonly T[]): T[] {
+  const copy = arr.slice();
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function orderStorageKey(code: string) {
+  return `scenario-order-${code}`;
+}
+function directionsStorageKey(code: string) {
+  return `scenario-directions-${code}`;
+}
+
+function loadScenarioOrder(code: string, fromServer: string | null): string[] {
+  if (fromServer) {
+    const parts = fromServer.split(",").filter(Boolean);
+    if (parts.length === SCENARIOS.length) return parts;
+  }
+  if (typeof window !== "undefined") {
+    const local = window.localStorage.getItem(orderStorageKey(code));
+    if (local) {
+      const parts = local.split(",").filter(Boolean);
+      if (parts.length === SCENARIOS.length) return parts;
+    }
+  }
+  const fresh = shuffle(SCENARIOS.map((s) => s.code));
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(orderStorageKey(code), fresh.join(","));
+  }
+  return fresh;
+}
+
+function loadDirections(code: string): Record<string, Direction> {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(directionsStorageKey(code));
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function saveDirections(code: string, directions: Record<string, Direction>) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(directionsStorageKey(code), JSON.stringify(directions));
+}
 
 export default function SessionPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = use(params);
   const router = useRouter();
   const { phase, stage, cardIndex, setPhase, setStage, setCardIndex, setSession } =
     useSession();
-  const [showVignette, setShowVignette] = useState(true);
   const [loading, setLoading] = useState(true);
 
   // Demographics state
@@ -29,23 +82,103 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
   const [usState, setUsState] = useState("");
   const [consent, setConsent] = useState(false);
 
+  // Warmup state
+  const [warmup, setWarmup] = useState<Record<string, string>>({ w1: "", w2: "", w3: "", w4: "" });
+  const [expandedOptions, setExpandedOptions] = useState<Record<string, boolean>>({});
+
+  // Debrief state
+  const [debrief, setDebrief] = useState<Record<string, string>>({
+    d1: "",
+    d2: "",
+    d3: "",
+    d4: "",
+    d5: "",
+    d6: "",
+  });
+  const [debriefSaved, setDebriefSaved] = useState(false);
+  const [savingDebrief, setSavingDebrief] = useState(false);
+
+  // Scenario order + base-prompt directions (for branching)
+  const [scenarioOrder, setScenarioOrder] = useState<string[]>([]);
+  const [directions, setDirections] = useState<Record<string, Direction>>({});
+
   // Debrief contact state
   const [wantsDiscussion, setWantsDiscussion] = useState(false);
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [contactSubmitted, setContactSubmitted] = useState(false);
 
+  // Swipe responses for tailoring the debrief chip suggestions
+  const [swipeHistory, setSwipeHistory] = useState<
+    { variant_code: string | null; swiped_right: boolean }[]
+  >([]);
+
   useEffect(() => {
     api
       .getParticipant(code)
-      .then((p) => {
+      .then(async (p) => {
         setSession(code);
         setPhase(p.current_phase);
         setStage(p.current_stage);
+        if (p.warmup_w1) setWarmup((w) => ({ ...w, w1: p.warmup_w1 || "" }));
+        if (p.warmup_w2) setWarmup((w) => ({ ...w, w2: p.warmup_w2 || "" }));
+        if (p.warmup_w3) setWarmup((w) => ({ ...w, w3: p.warmup_w3 || "" }));
+        if (p.warmup_w4) setWarmup((w) => ({ ...w, w4: p.warmup_w4 || "" }));
+        if (p.debrief_d1) setDebrief((d) => ({ ...d, d1: p.debrief_d1 || "" }));
+        if (p.debrief_d2) setDebrief((d) => ({ ...d, d2: p.debrief_d2 || "" }));
+        if (p.debrief_d3) setDebrief((d) => ({ ...d, d3: p.debrief_d3 || "" }));
+        if (p.debrief_d4) setDebrief((d) => ({ ...d, d4: p.debrief_d4 || "" }));
+        if (p.debrief_d5) setDebrief((d) => ({ ...d, d5: p.debrief_d5 || "" }));
+        if (p.debrief_d6) setDebrief((d) => ({ ...d, d6: p.debrief_d6 || "" }));
+        if (p.debrief_d1 || p.debrief_d2 || p.debrief_d3 || p.debrief_d4 || p.debrief_d5 || p.debrief_d6) {
+          setDebriefSaved(true);
+        }
+        const order = loadScenarioOrder(code, p.scenario_order);
+        setScenarioOrder(order);
+        setDirections(loadDirections(code));
+        if (!p.scenario_order) {
+          try {
+            await api.updateScenarioOrder(code, order.join(","));
+          } catch {
+            // non-fatal
+          }
+        }
         setLoading(false);
       })
       .catch(() => router.push("/"));
   }, [code, router, setSession, setPhase, setStage]);
+
+  // Pull full swipe history once we hit the debrief so chip suggestions can be tailored.
+  useEffect(() => {
+    if (phase !== 5) return;
+    api
+      .getResponses(code)
+      .then((rs) =>
+        setSwipeHistory(
+          rs.map((r) => ({ variant_code: r.variant_code, swiped_right: r.swiped_right }))
+        )
+      )
+      .catch(() => {});
+  }, [phase, code]);
+
+  const debriefHints = useMemo(() => {
+    const baseDir: Record<string, "right" | "left"> = {};
+    const hasFlip: Record<string, boolean> = { A: false, B: false, C: false };
+    const variants: Record<string, boolean[]> = { A: [], B: [], C: [] };
+    swipeHistory.forEach(({ variant_code, swiped_right }) => {
+      if (!variant_code) return;
+      const [scenario, kind] = variant_code.split("-");
+      if (!scenario || !["A", "B", "C"].includes(scenario)) return;
+      if (kind === "base") baseDir[scenario] = swiped_right ? "right" : "left";
+      else variants[scenario]?.push(swiped_right);
+    });
+    (["A", "B", "C"] as const).forEach((s) => {
+      const base = baseDir[s];
+      if (base === undefined) return;
+      hasFlip[s] = variants[s].some((v) => v !== (base === "right"));
+    });
+    return { baseDir, hasFlip };
+  }, [swipeHistory]);
 
   const submitDemographics = async () => {
     await api.updateDemographics(code, {
@@ -59,85 +192,149 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
     await api.updateProgress(code, 1, 0);
   };
 
+  const submitWarmup = async () => {
+    await api.updateWarmup(code, {
+      warmup_w1: warmup.w1 || undefined,
+      warmup_w2: warmup.w2 || undefined,
+      warmup_w3: warmup.w3 || undefined,
+      warmup_w4: warmup.w4 || undefined,
+    });
+    setPhase(3);
+    setStage(0);
+    setCardIndex(0);
+    await api.updateProgress(code, 3, 0);
+  };
+
+  // --- Swipe engine (Phase 3 = Pass 1 baseline, Phase 4 = Pass 2 counter-pressure) ---
+  const currentScenario: Scenario | null = useMemo(() => {
+    if ((phase !== 3 && phase !== 4) || scenarioOrder.length === 0) return null;
+    const scode = scenarioOrder[stage];
+    return scode ? SCENARIO_BY_CODE[scode] : null;
+  }, [phase, stage, scenarioOrder]);
+
+  const currentVariantText = useMemo(() => {
+    if (!currentScenario) return "";
+    if (phase === 3) return currentScenario.base;
+    const dir = directions[currentScenario.code];
+    const branch = dir === "right" ? currentScenario.right : currentScenario.left;
+    return branch[cardIndex]?.text ?? "";
+  }, [currentScenario, phase, cardIndex, directions]);
+
+  const currentVariantCode = useMemo(() => {
+    if (!currentScenario) return "";
+    if (phase === 3) return `${currentScenario.code}-base`;
+    const dir = directions[currentScenario.code];
+    const branch = dir === "right" ? currentScenario.right : currentScenario.left;
+    return branch[cardIndex]?.code ?? `${currentScenario.code}-unknown`;
+  }, [currentScenario, phase, cardIndex, directions]);
+
+  const globalSwipeNumber = useMemo(() => {
+    // 1-indexed across 12 swipes: Pass 1 = 1..3, Pass 2 = 4..12
+    if (phase === 3) return stage + 1;
+    return 3 + stage * 3 + cardIndex + 1;
+  }, [phase, stage, cardIndex]);
+
   const handleSwipe = useCallback(
     async (right: boolean, timeMs: number) => {
-      const currentStage = phase === 3 ? stage + 1 : 0;
-      const currentCard = cardIndex + 1;
+      if (!currentScenario) return;
 
-      await api.recordSwipe(code, {
-        phase,
-        stage: currentStage,
-        card_number: currentCard,
-        swiped_right: right,
-        response_time_ms: timeMs,
-      });
+      if (phase === 3) {
+        // Pass 1: one swipe per base scenario
+        await api.recordSwipe(code, {
+          phase: 3,
+          stage,
+          card_number: 0,
+          swiped_right: right,
+          response_time_ms: timeMs,
+          variant_code: `${currentScenario.code}-base`,
+        });
+        const nextDirs = {
+          ...directions,
+          [currentScenario.code]: (right ? "right" : "left") as Direction,
+        };
+        setDirections(nextDirs);
+        saveDirections(code, nextDirs);
 
-      const cards =
-        phase === 1 ? PHASE1_CARDS : phase === 3 ? STAGES[stage].cards : [];
-      if (cardIndex + 1 < cards.length) {
-        setCardIndex(cardIndex + 1);
-      } else {
-        if (phase === 1) {
-          setPhase(2);
-          await api.updateProgress(code, 2, 0);
-        } else if (phase === 3) {
-          if (stage + 1 < STAGES.length) {
-            setStage(stage + 1);
-            setShowVignette(true);
-            await api.updateProgress(code, 3, stage + 1);
-          } else {
-            setPhase(4);
-            await api.updateProgress(code, 4, 0);
-          }
+        if (stage + 1 < scenarioOrder.length) {
+          setStage(stage + 1);
+          await api.updateProgress(code, 3, stage + 1);
+        } else {
+          setPhase(4);
+          setStage(0);
+          setCardIndex(0);
+          await api.updateProgress(code, 4, 0);
         }
+        return;
+      }
+
+      if (phase === 4) {
+        // Pass 2: 3 variants per scenario, branch picked in Pass 1
+        const dir = directions[currentScenario.code];
+        const branch = dir === "right" ? currentScenario.right : currentScenario.left;
+        const variantCode = branch[cardIndex]?.code ?? `${currentScenario.code}-unknown`;
+        await api.recordSwipe(code, {
+          phase: 3,
+          stage,
+          card_number: cardIndex + 1,
+          swiped_right: right,
+          response_time_ms: timeMs,
+          variant_code: variantCode,
+        });
+
+        if (cardIndex + 1 < 3) {
+          setCardIndex(cardIndex + 1);
+          return;
+        }
+        if (stage + 1 < scenarioOrder.length) {
+          setStage(stage + 1);
+          setCardIndex(0);
+          await api.updateProgress(code, 4, stage + 1);
+          return;
+        }
+        setPhase(5);
+        await api.updateProgress(code, 5, 0);
+        return;
       }
     },
-    [code, phase, stage, cardIndex, setPhase, setStage, setCardIndex]
+    [code, phase, stage, cardIndex, currentScenario, directions, scenarioOrder, setStage, setCardIndex, setPhase]
   );
 
   const goBack = useCallback(() => {
     if (phase === 1) {
-      if (!showVignette && cardIndex > 0) {
-        setCardIndex(cardIndex - 1);
-      } else if (!showVignette && cardIndex === 0) {
-        setShowVignette(true);
-      } else if (showVignette) {
-        setPhase(0);
-      }
+      setPhase(0);
       return;
     }
-
     if (phase === 2) {
       setPhase(1);
-      setCardIndex(PHASE1_CARDS.length - 1);
       return;
     }
-
     if (phase === 3) {
-      if (!showVignette && cardIndex > 0) {
-        setCardIndex(cardIndex - 1);
-      } else if (!showVignette && cardIndex === 0) {
-        setShowVignette(true);
-      } else if (showVignette && stage > 0) {
+      if (stage > 0) {
         setStage(stage - 1);
-        setCardIndex(STAGES[stage - 1].cards.length - 1);
-        setShowVignette(false);
-      } else if (showVignette && stage === 0) {
+      } else {
         setPhase(2);
       }
       return;
     }
-
     if (phase === 4) {
-      setPhase(3);
-      setStage(STAGES.length - 1);
-      setCardIndex(STAGES[STAGES.length - 1].cards.length - 1);
-      setShowVignette(false);
+      if (cardIndex > 0) {
+        setCardIndex(cardIndex - 1);
+      } else if (stage > 0) {
+        setStage(stage - 1);
+        setCardIndex(2);
+      } else {
+        setPhase(3);
+        setStage(scenarioOrder.length - 1);
+      }
       return;
     }
-  }, [phase, stage, cardIndex, showVignette, setPhase, setStage, setCardIndex]);
-
-  const canGoBack = phase >= 1;
+    if (phase === 5) {
+      setPhase(4);
+      setStage(scenarioOrder.length - 1);
+      setCardIndex(2);
+      return;
+    }
+  }, [phase, stage, cardIndex, scenarioOrder.length, setPhase, setStage, setCardIndex]);
 
   if (loading) {
     return (
@@ -226,128 +423,326 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
     );
   }
 
-  // Phase 1: Your Story
+  // Phase 1: Onboarding
   if (phase === 1) {
-    if (cardIndex === 0 && showVignette) {
-      return (
-        <Screen>
-          <PhaseHeader phase={1} title="Your Story" />
-          <p className="text-zinc-500 leading-relaxed max-w-2xl text-center text-base sm:text-lg">{PHASE1_INTRO}</p>
-          <button onClick={() => setShowVignette(false)} className="btn-primary">
-            Begin
-          </button>
-          <BackButton onClick={goBack} />
-        </Screen>
-      );
-    }
-    return (
-      <Screen fixed>
-        <SwipeCard
-          key={`p1-${cardIndex}`}
-          text={PHASE1_CARDS[cardIndex].text}
-          cardNumber={cardIndex + 1}
-          totalCards={PHASE1_CARDS.length}
-          onSwipe={handleSwipe}
-          onBack={canGoBack ? goBack : undefined}
-        />
-      </Screen>
-    );
-  }
-
-  // Phase 2: The World Has Changed
-  if (phase === 2) {
     return (
       <Screen>
-        <PhaseHeader phase={2} title="The World Has Changed" />
-        <div className="max-w-2xl text-zinc-500 leading-relaxed whitespace-pre-line text-base sm:text-lg">
-          {PHASE2_TEXT}
-        </div>
+        <PhaseHeader phase={1} title="Onboarding" />
+        <p className="text-zinc-500 leading-relaxed max-w-2xl text-center text-base sm:text-lg">
+          {ONBOARDING_TEXT}
+        </p>
         <button
           onClick={async () => {
-            setPhase(3);
-            setStage(0);
-            setShowVignette(true);
-            await api.updateProgress(code, 3, 0);
+            setPhase(2);
+            await api.updateProgress(code, 2, 0);
           }}
           className="btn-primary"
         >
-          The Chase Begins
+          Begin
         </button>
         <BackButton onClick={goBack} />
       </Screen>
     );
   }
 
-  // Phase 3: The Chase (10 stages)
-  if (phase === 3) {
-    const currentStage = STAGES[stage];
+  // Phase 2: Warmup
+  if (phase === 2) {
+    return (
+      <Screen>
+        <PhaseHeader phase={1} title="A Few Quick Questions" />
+        <p className="text-zinc-400 text-base text-center max-w-2xl">
+          Before we start, tell us a bit about your own experience with dating apps. All answers are optional.
+        </p>
+        <div className="w-full max-w-2xl space-y-6">
+          {WARMUP_QUESTIONS.map((q) => {
+            const value = warmup[q.key];
+            const parts = value
+              .split(",")
+              .map((p) => p.trim())
+              .filter(Boolean);
+            const toggleOption = (opt: string) => {
+              const has = parts.some((p) => p.toLowerCase() === opt.toLowerCase());
+              const next = has
+                ? parts.filter((p) => p.toLowerCase() !== opt.toLowerCase())
+                : [...parts, opt];
+              setWarmup({ ...warmup, [q.key]: next.join(", ") });
+            };
+            const PREVIEW_COUNT = 8;
+            const expanded = !!expandedOptions[q.key];
+            const allOptions = q.options ?? [];
+            const needsCollapse = allOptions.length > PREVIEW_COUNT;
+            const selectedBeyondPreview = allOptions
+              .slice(PREVIEW_COUNT)
+              .filter((opt) => parts.some((p) => p.toLowerCase() === opt.toLowerCase()));
+            const visibleOptions = expanded || !needsCollapse
+              ? allOptions
+              : [...allOptions.slice(0, PREVIEW_COUNT), ...selectedBeyondPreview];
+            return (
+              <div key={q.key} className="space-y-2">
+                <label className="block text-zinc-700 font-medium text-base">{q.prompt}</label>
+                {q.options && (
+                  <div className="flex flex-wrap gap-2 items-center">
+                    {visibleOptions.map((opt) => {
+                      const selected = parts.some(
+                        (p) => p.toLowerCase() === opt.toLowerCase()
+                      );
+                      return (
+                        <button
+                          key={opt}
+                          type="button"
+                          onClick={() => toggleOption(opt)}
+                          className={`px-3 py-1.5 rounded-full text-sm border transition ${
+                            selected
+                              ? "bg-violet-600 border-violet-600 text-white"
+                              : "bg-white border-zinc-300 text-zinc-700 hover:border-zinc-400"
+                          }`}
+                        >
+                          {opt}
+                        </button>
+                      );
+                    })}
+                    {needsCollapse && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedOptions((prev) => ({ ...prev, [q.key]: !expanded }))
+                        }
+                        className="px-3 py-1.5 rounded-full text-sm border border-dashed border-zinc-300 text-zinc-600 hover:border-zinc-400 hover:text-zinc-800"
+                      >
+                        {expanded
+                          ? "Show less"
+                          : `+${allOptions.length - visibleOptions.length} more`}
+                      </button>
+                    )}
+                  </div>
+                )}
+                <textarea
+                  value={value}
+                  onChange={(e) => setWarmup({ ...warmup, [q.key]: e.target.value })}
+                  placeholder={q.options ? "Tap options above or type your own" : q.placeholder}
+                  rows={3}
+                  className="input-field resize-y"
+                />
+              </div>
+            );
+          })}
+        </div>
+        <button onClick={submitWarmup} className="btn-primary">
+          Start the swipes
+        </button>
+        <BackButton onClick={goBack} />
+      </Screen>
+    );
+  }
 
-    if (showVignette) {
-      return (
-        <Screen>
-          <div className="text-center">
-            <div className="text-sm tracking-widest text-zinc-400 uppercase mb-1">
-              Stage {currentStage.number} of {STAGES.length}
-            </div>
-            <h2 className="text-3xl font-bold">{currentStage.title}</h2>
-            <p className="text-base text-zinc-400 italic">{currentStage.subtitle}</p>
-          </div>
-          <p className="text-zinc-500 leading-relaxed max-w-2xl text-center text-base sm:text-lg">
-            {currentStage.vignette}
-          </p>
-          <button onClick={() => setShowVignette(false)} className="btn-primary">
-            Continue
-          </button>
-          <BackButton onClick={goBack} />
-        </Screen>
-      );
-    }
-
+  // Phase 3 (Pass 1 Baseline) and Phase 4 (Pass 2 Counter-pressure): swipe experiment
+  if ((phase === 3 || phase === 4) && currentScenario) {
+    const phaseLabel = phase === 3 ? "Phase 2" : "Phase 3";
     return (
       <Screen fixed>
         <SwipeCard
-          key={`s${stage}-c${cardIndex}`}
-          text={currentStage.cards[cardIndex].text}
-          cardNumber={cardIndex + 1}
-          totalCards={currentStage.cards.length}
+          key={currentVariantCode}
+          text={currentVariantText}
+          cardNumber={globalSwipeNumber}
+          totalCards={TOTAL_SWIPES}
           onSwipe={handleSwipe}
           onBack={goBack}
+          phaseLabel={phaseLabel}
+          scenarioTitle={currentScenario.title}
+          scenarioSubtitle={currentScenario.subtitle}
         />
       </Screen>
     );
   }
 
-  // Phase 4: Debrief
-  if (phase === 4) {
+  // Phase 5: Debrief
+  if (phase === 5) {
+    const suggestedFor = (key: string): Set<string> => {
+      const { baseDir, hasFlip } = debriefHints;
+      const haveSwipes = Object.keys(baseDir).length > 0;
+      if (!haveSwipes) return new Set();
+      const extractCode = (opt: string) => opt.match(/\(([ABC])\)/)?.[1] ?? null;
+      if (key === "d1") {
+        const s = new Set<string>();
+        (["A", "B", "C"] as const).forEach((code) => {
+          const dir = baseDir[code];
+          if (!dir) return;
+          const needle = dir === "right" ? "Would use" : "Would never use";
+          (DEBRIEF_QUESTIONS.find((q) => q.key === "d1")?.options ?? []).forEach((opt) => {
+            if (extractCode(opt) === code && opt.startsWith(needle)) s.add(opt);
+          });
+        });
+        return s;
+      }
+      if (key === "d2") {
+        const s = new Set<string>();
+        const flippedScenarios = (["A", "B", "C"] as const).filter((c) => hasFlip[c]);
+        if (flippedScenarios.length === 0) {
+          s.add("Didn't flip on any");
+          return s;
+        }
+        (DEBRIEF_QUESTIONS.find((q) => q.key === "d2")?.options ?? []).forEach((opt) => {
+          const code = extractCode(opt);
+          if (code && flippedScenarios.includes(code as "A" | "B" | "C")) s.add(opt);
+        });
+        return s;
+      }
+      return new Set();
+    };
+
+    const saveDebrief = async () => {
+      setSavingDebrief(true);
+      try {
+        await api.updateDebrief(code, {
+          debrief_d1: debrief.d1 || undefined,
+          debrief_d2: debrief.d2 || undefined,
+          debrief_d3: debrief.d3 || undefined,
+          debrief_d4: debrief.d4 || undefined,
+          debrief_d5: debrief.d5 || undefined,
+          debrief_d6: debrief.d6 || undefined,
+        });
+        setDebriefSaved(true);
+      } finally {
+        setSavingDebrief(false);
+      }
+    };
+
     return (
       <Screen>
         <PhaseHeader phase={4} title="Debrief" />
-        <div className="max-w-2xl text-left space-y-5">
-          <p className="text-zinc-400 text-base">
-            The journey is complete. Here are some questions to reflect on.
-          </p>
-          <ol className="space-y-4">
-            {DEBRIEF_QUESTIONS.map((q, i) => (
-              <li key={i} className="text-zinc-600 text-base leading-relaxed">
-                <span className="text-zinc-400 font-mono mr-2">{i + 1}.</span>
-                {q}
-              </li>
-            ))}
-          </ol>
+        <p className="text-zinc-500 text-base text-center max-w-2xl">
+          Thanks for swiping through all twelve scenarios. Here are a few closing
+          questions about what you just saw. All answers are optional — you can skip
+          any question, pick from the chips, or type your own.
+        </p>
+
+        <div className="w-full max-w-2xl space-y-6">
+          {DEBRIEF_QUESTIONS.map((q) => {
+            const value = debrief[q.key];
+            const parts = value
+              .split(",")
+              .map((p) => p.trim())
+              .filter(Boolean);
+            const toggleOption = (opt: string) => {
+              const has = parts.some((p) => p.toLowerCase() === opt.toLowerCase());
+              const next = has
+                ? parts.filter((p) => p.toLowerCase() !== opt.toLowerCase())
+                : [...parts, opt];
+              setDebrief({ ...debrief, [q.key]: next.join(", ") });
+            };
+            const PREVIEW_COUNT = 8;
+            const debriefExpandedKey = `debrief-${q.key}`;
+            const expanded = !!expandedOptions[debriefExpandedKey];
+            const rawOptions = q.options ?? [];
+            const suggested = suggestedFor(q.key);
+            const allOptions =
+              suggested.size > 0
+                ? [...rawOptions.filter((o) => suggested.has(o)), ...rawOptions.filter((o) => !suggested.has(o))]
+                : rawOptions;
+            const needsCollapse = allOptions.length > PREVIEW_COUNT;
+            const selectedBeyondPreview = allOptions
+              .slice(PREVIEW_COUNT)
+              .filter((opt) => parts.some((p) => p.toLowerCase() === opt.toLowerCase()));
+            const visibleOptions =
+              expanded || !needsCollapse
+                ? allOptions
+                : [...allOptions.slice(0, PREVIEW_COUNT), ...selectedBeyondPreview];
+            return (
+              <div key={q.key} className="space-y-2">
+                <label className="block text-zinc-700 font-medium text-base">
+                  {q.prompt}
+                </label>
+                {q.options && (
+                  <div className="flex flex-wrap gap-2 items-center">
+                    {visibleOptions.map((opt) => {
+                      const selected = parts.some(
+                        (p) => p.toLowerCase() === opt.toLowerCase()
+                      );
+                      const isSuggested = suggested.has(opt);
+                      return (
+                        <button
+                          key={opt}
+                          type="button"
+                          onClick={() => toggleOption(opt)}
+                          title={isSuggested ? "Matches your swipes" : undefined}
+                          className={`px-3 py-1.5 rounded-full text-sm border transition ${
+                            selected
+                              ? "bg-violet-600 border-violet-600 text-white"
+                              : isSuggested
+                                ? "bg-violet-50 border-violet-300 text-violet-700 hover:border-violet-500"
+                                : "bg-white border-zinc-300 text-zinc-700 hover:border-zinc-400"
+                          }`}
+                        >
+                          {isSuggested && !selected && <span className="mr-1">★</span>}
+                          {opt}
+                        </button>
+                      );
+                    })}
+                    {needsCollapse && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedOptions((prev) => ({
+                            ...prev,
+                            [debriefExpandedKey]: !expanded,
+                          }))
+                        }
+                        className="px-3 py-1.5 rounded-full text-sm border border-dashed border-zinc-300 text-zinc-600 hover:border-zinc-400 hover:text-zinc-800"
+                      >
+                        {expanded
+                          ? "Show less"
+                          : `+${allOptions.length - visibleOptions.length} more`}
+                      </button>
+                    )}
+                  </div>
+                )}
+                <textarea
+                  value={value}
+                  onChange={(e) => setDebrief({ ...debrief, [q.key]: e.target.value })}
+                  placeholder={q.placeholder}
+                  rows={3}
+                  className="input-field resize-y"
+                />
+              </div>
+            );
+          })}
+
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={saveDebrief}
+              disabled={savingDebrief}
+              className="btn-primary"
+            >
+              {savingDebrief
+                ? "Saving..."
+                : debriefSaved
+                  ? "Save changes"
+                  : "Save my answers"}
+            </button>
+            {debriefSaved && !savingDebrief && (
+              <span className="text-green-600 text-sm">Saved.</span>
+            )}
+          </div>
         </div>
 
-        {/* Discussion opt-in */}
+        {/* Optional researcher chat opt-in */}
         <div className="max-w-2xl w-full border border-zinc-200 rounded-2xl p-6 space-y-4">
-          <p className="text-zinc-700 text-base font-medium">
-            Would you like to discuss these questions with a researcher?
-          </p>
+          <div>
+            <p className="text-zinc-700 text-base font-medium">
+              Want to talk this over with us?
+            </p>
+            <p className="text-zinc-400 text-sm mt-1">
+              Optional. If you&apos;d like to chat with a researcher about your
+              answers, leave a contact below.
+            </p>
+          </div>
           {!wantsDiscussion && !contactSubmitted && (
             <div className="flex gap-3">
               <button
                 onClick={() => setWantsDiscussion(true)}
                 className="btn-primary"
               >
-                Yes, I'm interested
+                Yes, I&apos;m interested
               </button>
               <button
                 onClick={async () => {
@@ -362,9 +757,6 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
           )}
           {wantsDiscussion && !contactSubmitted && (
             <div className="space-y-3">
-              <p className="text-zinc-400 text-sm">
-                Leave your email and/or phone number and we will reach out to schedule a call.
-              </p>
               <input
                 type="email"
                 placeholder="Email address"
@@ -412,6 +804,16 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
             </div>
           )}
         </div>
+
+        <button
+          onClick={async () => {
+            await api.updateProgress(code, 5, 0);
+            router.push("/");
+          }}
+          className="text-sm text-zinc-400 hover:text-zinc-600 underline underline-offset-4"
+        >
+          End session
+        </button>
       </Screen>
     );
   }
