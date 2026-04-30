@@ -131,6 +131,18 @@ function HomeContent() {
         Research Consent & Legal Information
       </a>
 
+      <button
+        onClick={() => {
+          clearCompletion();
+          reset();
+          setActiveSession(null);
+          setCompletion(null);
+        }}
+        className="text-xs text-zinc-300 hover:text-zinc-500 transition-colors underline underline-offset-4"
+      >
+        Reset (testing)
+      </button>
+
       <a
         href={`/admin/${process.env.NEXT_PUBLIC_ADMIN_SLUG || "r9k4x7m2b8f1n5p3q6w0t4v8"}`}
         className="fixed bottom-6 right-6 text-sm text-zinc-400 hover:text-zinc-700 border border-zinc-300 hover:border-zinc-500 rounded-full px-4 py-2 transition-colors bg-white/80 backdrop-blur-sm"
