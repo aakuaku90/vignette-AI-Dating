@@ -827,10 +827,10 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
             </p>
           </div>
           {!wantsDiscussion && !contactSubmitted && (
-            <div className="flex gap-3">
+            <div className="flex flex-col sm:flex-row gap-3">
               <button
                 onClick={() => setWantsDiscussion(true)}
-                className="btn-primary"
+                className="btn-primary w-full sm:w-auto"
               >
                 Yes, I&apos;m interested
               </button>
@@ -840,7 +840,7 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
                   await api.updateProgress(code, 5, 0);
                   router.push("/thank-you");
                 }}
-                className="btn-secondary"
+                className="btn-secondary w-full sm:w-auto"
               >
                 No thanks
               </button>
