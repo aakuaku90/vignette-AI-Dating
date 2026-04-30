@@ -225,7 +225,6 @@ export default function AdminPage() {
                 <th className="p-4">State</th>
                 <th className="p-4">Consent</th>
                 <th className="p-4">Phase</th>
-                <th className="p-4">Stage</th>
                 <th className="p-4">Started</th>
                 <th className="p-4">Completed</th>
                 <th className="p-4">Status</th>
@@ -264,7 +263,6 @@ export default function AdminPage() {
                     )}
                   </td>
                   <td className="p-4">{displayPhase(p.current_phase)}</td>
-                  <td className="p-4">{p.current_stage}</td>
                   <td className="p-4" title={new Date(p.started_at).toLocaleString()}>
                     {new Date(p.started_at).toLocaleString(undefined, {
                       month: "short",
@@ -307,7 +305,7 @@ export default function AdminPage() {
               ))}
               {participants.length === 0 && (
                 <tr>
-                  <td colSpan={14} className="p-8 text-center text-zinc-400">
+                  <td colSpan={13} className="p-8 text-center text-zinc-400">
                     No participants yet.
                   </td>
                 </tr>
