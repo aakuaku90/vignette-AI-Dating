@@ -1,12 +1,20 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { useSession } from "@/lib/store";
 import { getCompletion, clearCompletion, type CompletionRecord } from "@/lib/completion";
 
 export default function Home() {
+  return (
+    <Suspense fallback={<div className="min-h-[100dvh] flex items-center justify-center"><div className="animate-pulse text-zinc-400">Loading...</div></div>}>
+      <HomeContent />
+    </Suspense>
+  );
+}
+
+function HomeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { sessionCode, reset } = useSession();
