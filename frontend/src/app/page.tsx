@@ -1,18 +1,26 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { useSession } from "@/lib/store";
+import { getCompletion, clearCompletion, type CompletionRecord } from "@/lib/completion";
 
 export default function Home() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { sessionCode, reset } = useSession();
   const [creating, setCreating] = useState(false);
   const [checking, setChecking] = useState(true);
   const [activeSession, setActiveSession] = useState<string | null>(null);
+  const [completion, setCompletion] = useState<CompletionRecord | null>(null);
 
   useEffect(() => {
+    if (searchParams?.get("reset") === "1") {
+      clearCompletion();
+      reset();
+    }
+    setCompletion(getCompletion());
     if (!sessionCode) {
       setChecking(false);
       return;
@@ -31,7 +39,7 @@ export default function Home() {
         reset();
         setChecking(false);
       });
-  }, [sessionCode, router, reset]);
+  }, [sessionCode, router, reset, searchParams]);
 
   const startNew = async () => {
     setCreating(true);
@@ -88,6 +96,20 @@ export default function Home() {
             Start over instead
           </button>
         </div>
+      ) : completion ? (
+        <div className="flex flex-col items-center gap-3 max-w-md text-center">
+          <button
+            disabled
+            className="btn-primary opacity-50 cursor-not-allowed"
+          >
+            Already Completed
+          </button>
+          <p className="text-zinc-500 text-sm leading-relaxed">
+            Thanks! Our records show this device already participated on{" "}
+            {new Date(completion.completedAt).toLocaleDateString()}. Each person
+            should only take the study once.
+          </p>
+        </div>
       ) : (
         <button onClick={startNew} disabled={creating} className="btn-primary">
           {creating ? "Starting..." : "Get Started"}
@@ -100,6 +122,18 @@ export default function Home() {
       >
         Research Consent & Legal Information
       </a>
+
+      <button
+        onClick={() => {
+          clearCompletion();
+          reset();
+          setActiveSession(null);
+          setCompletion(null);
+        }}
+        className="text-xs text-zinc-300 hover:text-zinc-500 transition-colors underline underline-offset-4"
+      >
+        Reset (testing)
+      </button>
 
       <a
         href={`/admin/${process.env.NEXT_PUBLIC_ADMIN_SLUG || "r9k4x7m2b8f1n5p3q6w0t4v8"}`}

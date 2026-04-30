@@ -1,12 +1,41 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion, useMotionValue, useTransform, PanInfo } from "framer-motion";
 
-function vibrate() {
+function vibrate(pattern: number | number[] = 30) {
   if (typeof navigator !== "undefined" && navigator.vibrate) {
-    navigator.vibrate(30);
+    navigator.vibrate(pattern);
   }
+}
+
+let audioCtx: AudioContext | null = null;
+function getAudioCtx(): AudioContext | null {
+  if (typeof window === "undefined") return null;
+  if (!audioCtx) {
+    const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    if (!Ctor) return null;
+    audioCtx = new Ctor();
+  }
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  return audioCtx;
+}
+
+function playTone(frequency: number, durationMs: number, volume = 0.08) {
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = "sine";
+  osc.frequency.value = frequency;
+  const now = ctx.currentTime;
+  const dur = durationMs / 1000;
+  gain.gain.setValueAtTime(0, now);
+  gain.gain.linearRampToValueAtTime(volume, now + 0.005);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(now);
+  osc.stop(now + dur);
 }
 
 interface SwipeCardProps {
@@ -35,25 +64,42 @@ export default function SwipeCard({
   const leftOpacity = useTransform(x, [-150, -50], [1, 0]);
   const rightOpacity = useTransform(x, [50, 150], [0, 1]);
   const startTime = useRef(Date.now());
-  const [exiting, setExiting] = useState(false);
+  const [exitDirection, setExitDirection] = useState<0 | 1 | -1>(0);
   const progress = cardNumber / totalCards;
+  const thresholdCrossed = useRef(false);
+
+  useEffect(() => {
+    const threshold = 100;
+    const unsubscribe = x.on("change", (value) => {
+      const crossed = Math.abs(value) > threshold;
+      if (crossed && !thresholdCrossed.current) {
+        thresholdCrossed.current = true;
+        vibrate(15);
+        playTone(value > 0 ? 660 : 330, 60, 0.05);
+      } else if (!crossed && thresholdCrossed.current) {
+        thresholdCrossed.current = false;
+      }
+    });
+    return unsubscribe;
+  }, [x]);
+
+  const commit = (right: boolean) => {
+    setExitDirection(right ? 1 : -1);
+    vibrate();
+    playTone(right ? 880 : 220, 140, 0.09);
+    const elapsed = Date.now() - startTime.current;
+    setTimeout(() => onSwipe(right, elapsed), 200);
+  };
 
   const handleDragEnd = (_: unknown, info: PanInfo) => {
     const threshold = 100;
     if (Math.abs(info.offset.x) > threshold) {
-      setExiting(true);
-      vibrate();
-      const right = info.offset.x > 0;
-      const elapsed = Date.now() - startTime.current;
-      setTimeout(() => onSwipe(right, elapsed), 200);
+      commit(info.offset.x > 0);
     }
   };
 
   const handleButton = (right: boolean) => {
-    setExiting(true);
-    vibrate();
-    const elapsed = Date.now() - startTime.current;
-    setTimeout(() => onSwipe(right, elapsed), 200);
+    commit(right);
   };
 
   return (
@@ -64,7 +110,7 @@ export default function SwipeCard({
           dragConstraints={{ left: 0, right: 0 }}
           onDragEnd={handleDragEnd}
           style={{ x, rotate }}
-          animate={exiting ? { x: 300, opacity: 0 } : {}}
+          animate={exitDirection !== 0 ? { x: exitDirection * 600, opacity: 0 } : {}}
           transition={{ type: "spring", stiffness: 300, damping: 30 }}
           className="absolute inset-0 cursor-grab active:cursor-grabbing"
         >

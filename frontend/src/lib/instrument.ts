@@ -257,12 +257,12 @@ export const DEBRIEF_QUESTIONS: DebriefQuestion[] = [
       "Across all three scenarios, which felt most like something you would actually use, and which felt most like something you would never use? What made the difference?",
     placeholder: "e.g., Would use group meetups, would never use curated matches, because …",
     options: [
-      "Would use curated matches (A)",
-      "Would use message coaching (B)",
-      "Would use group meetups (C)",
-      "Would never use curated matches (A)",
-      "Would never use message coaching (B)",
-      "Would never use group meetups (C)",
+      "Would use one AI-picked match per week (A)",
+      "Would use AI-suggested replies while messaging (B)",
+      "Would use AI-assembled small group meetups (C)",
+      "Would never use one AI-picked match per week (A)",
+      "Would never use AI-suggested replies while messaging (B)",
+      "Would never use AI-assembled small group meetups (C)",
     ],
   },
   {
@@ -270,12 +270,6 @@ export const DEBRIEF_QUESTIONS: DebriefQuestion[] = [
     prompt:
       "For any scenario where you flipped between the base version and a later variant, what was it about that variant that changed your mind?",
     placeholder: "What specifically made you change direction?",
-    options: [
-      "Didn't flip on any",
-      "Flipped on curated matches (A)",
-      "Flipped on message coaching (B)",
-      "Flipped on group meetups (C)",
-    ],
   },
   {
     key: "d3",

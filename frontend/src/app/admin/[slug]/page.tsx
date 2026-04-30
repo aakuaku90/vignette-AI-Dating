@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { Participant, SwipeResponseData } from "@/lib/api";
-import { SCENARIO_BY_CODE, SCENARIOS } from "@/lib/instrument";
+import { SCENARIO_BY_CODE, SCENARIOS, WARMUP_QUESTIONS, DEBRIEF_QUESTIONS } from "@/lib/instrument";
 
 interface Stats {
   total_participants: number;
@@ -272,7 +272,72 @@ export default function AdminPage() {
                 </svg>
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-6">
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {(() => {
+                const selectedParticipant = participants.find((p) => p.session_code === selected);
+                const warmupValues: Record<string, string | null> = {
+                  w1: selectedParticipant?.warmup_w1 ?? null,
+                  w2: selectedParticipant?.warmup_w2 ?? null,
+                  w3: selectedParticipant?.warmup_w3 ?? null,
+                  w4: selectedParticipant?.warmup_w4 ?? null,
+                };
+                const debriefValues: Record<string, string | null> = {
+                  d1: selectedParticipant?.debrief_d1 ?? null,
+                  d2: selectedParticipant?.debrief_d2 ?? null,
+                  d3: selectedParticipant?.debrief_d3 ?? null,
+                  d4: selectedParticipant?.debrief_d4 ?? null,
+                  d5: selectedParticipant?.debrief_d5 ?? null,
+                  d6: selectedParticipant?.debrief_d6 ?? null,
+                };
+                const hasWarmup = Object.values(warmupValues).some((v) => v && v.trim().length > 0);
+                const hasDebrief = Object.values(debriefValues).some((v) => v && v.trim().length > 0);
+                return (
+                  <>
+                    <div>
+                      <h3 className="text-sm font-semibold text-zinc-700 mb-3">A Few Quick Questions</h3>
+                      {hasWarmup ? (
+                        <div className="space-y-3">
+                          {WARMUP_QUESTIONS.map((q) => {
+                            const value = warmupValues[q.key];
+                            return (
+                              <div key={q.key} className="text-sm">
+                                <p className="text-zinc-500 text-xs leading-snug mb-1">{q.prompt}</p>
+                                <p className="text-zinc-800 leading-relaxed">
+                                  {value && value.trim().length > 0 ? value : <span className="text-zinc-300">—</span>}
+                                </p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-zinc-400 text-sm">No warmup answers yet.</p>
+                      )}
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-semibold text-zinc-700 mb-3">Debrief</h3>
+                      {hasDebrief ? (
+                        <div className="space-y-3">
+                          {DEBRIEF_QUESTIONS.map((q) => {
+                            const value = debriefValues[q.key];
+                            return (
+                              <div key={q.key} className="text-sm">
+                                <p className="text-zinc-500 text-xs leading-snug mb-1">{q.prompt}</p>
+                                <p className="text-zinc-800 leading-relaxed">
+                                  {value && value.trim().length > 0 ? value : <span className="text-zinc-300">—</span>}
+                                </p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-zinc-400 text-sm">No debrief answers yet.</p>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
+              <div>
+                <h3 className="text-sm font-semibold text-zinc-700 mb-3">Swipe Responses</h3>
               {responses.length === 0 ? (
                 <p className="text-zinc-400 text-sm">No responses recorded yet.</p>
               ) : (
@@ -318,6 +383,7 @@ export default function AdminPage() {
                   ))}
                 </div>
               )}
+              </div>
             </div>
           </div>
         </>

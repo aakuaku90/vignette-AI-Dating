@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState, useCallback, use, useMemo } from "react";
+import { useEffect, useState, useCallback, use, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import SwipeCard from "@/components/SwipeCard";
 import ComboBox from "@/components/ComboBox";
 import { api } from "@/lib/api";
 import { useSession } from "@/lib/store";
+import { markCompleted } from "@/lib/completion";
 import {
   ONBOARDING_TEXT,
   WARMUP_QUESTIONS,
@@ -97,6 +98,8 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
   });
   const [debriefSaved, setDebriefSaved] = useState(false);
   const [savingDebrief, setSavingDebrief] = useState(false);
+  const debriefDirty = useRef(false);
+  const debriefTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Scenario order + base-prompt directions (for branching)
   const [scenarioOrder, setScenarioOrder] = useState<string[]>([]);
@@ -112,6 +115,36 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
   const [swipeHistory, setSwipeHistory] = useState<
     { variant_code: string | null; swiped_right: boolean }[]
   >([]);
+  const [swipeHistoryLoaded, setSwipeHistoryLoaded] = useState(false);
+
+  const updateDebriefField = useCallback((key: string, value: string) => {
+    debriefDirty.current = true;
+    setDebrief((d) => ({ ...d, [key]: value }));
+  }, []);
+
+  useEffect(() => {
+    if (!debriefDirty.current) return;
+    if (debriefTimer.current) clearTimeout(debriefTimer.current);
+    debriefTimer.current = setTimeout(async () => {
+      setSavingDebrief(true);
+      try {
+        await api.updateDebrief(code, {
+          debrief_d1: debrief.d1 || undefined,
+          debrief_d2: debrief.d2 || undefined,
+          debrief_d3: debrief.d3 || undefined,
+          debrief_d4: debrief.d4 || undefined,
+          debrief_d5: debrief.d5 || undefined,
+          debrief_d6: debrief.d6 || undefined,
+        });
+        setDebriefSaved(true);
+      } finally {
+        setSavingDebrief(false);
+      }
+    }, 800);
+    return () => {
+      if (debriefTimer.current) clearTimeout(debriefTimer.current);
+    };
+  }, [code, debrief]);
 
   useEffect(() => {
     api
@@ -120,6 +153,9 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
         setSession(code);
         setPhase(p.current_phase);
         setStage(p.current_stage);
+        if (p.completed_at || p.current_phase >= 5) {
+          markCompleted(code);
+        }
         if (p.warmup_w1) setWarmup((w) => ({ ...w, w1: p.warmup_w1 || "" }));
         if (p.warmup_w2) setWarmup((w) => ({ ...w, w2: p.warmup_w2 || "" }));
         if (p.warmup_w3) setWarmup((w) => ({ ...w, w3: p.warmup_w3 || "" }));
@@ -153,11 +189,12 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
     if (phase !== 5) return;
     api
       .getResponses(code)
-      .then((rs) =>
+      .then((rs) => {
         setSwipeHistory(
           rs.map((r) => ({ variant_code: r.variant_code, swiped_right: r.swiped_right }))
-        )
-      )
+        );
+        setSwipeHistoryLoaded(true);
+      })
       .catch(() => {});
   }, [phase, code]);
 
@@ -165,6 +202,7 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
     const baseDir: Record<string, "right" | "left"> = {};
     const hasFlip: Record<string, boolean> = { A: false, B: false, C: false };
     const variants: Record<string, boolean[]> = { A: [], B: [], C: [] };
+    const flippedVariantCodes: Record<string, string[]> = { A: [], B: [], C: [] };
     swipeHistory.forEach(({ variant_code, swiped_right }) => {
       if (!variant_code) return;
       const [scenario, kind] = variant_code.split("-");
@@ -172,12 +210,41 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
       if (kind === "base") baseDir[scenario] = swiped_right ? "right" : "left";
       else variants[scenario]?.push(swiped_right);
     });
+    swipeHistory.forEach(({ variant_code, swiped_right }) => {
+      if (!variant_code) return;
+      const [scenario, kind] = variant_code.split("-");
+      if (!scenario || !kind || kind === "base") return;
+      const base = baseDir[scenario];
+      if (base === undefined) return;
+      if (swiped_right !== (base === "right")) {
+        flippedVariantCodes[scenario]?.push(variant_code);
+      }
+    });
     (["A", "B", "C"] as const).forEach((s) => {
       const base = baseDir[s];
       if (base === undefined) return;
       hasFlip[s] = variants[s].some((v) => v !== (base === "right"));
     });
-    return { baseDir, hasFlip };
+
+    const flippedDetails = (["A", "B", "C"] as const)
+      .filter((s) => hasFlip[s])
+      .map((s) => {
+        const scenario = SCENARIO_BY_CODE[s];
+        const base = baseDir[s];
+        const branch = base === "right" ? scenario.right : scenario.left;
+        const flippedTexts = flippedVariantCodes[s]
+          .map((code) => branch.find((v) => v.code === code)?.text)
+          .filter((t): t is string => Boolean(t));
+        return {
+          scenarioCode: s,
+          scenarioTitle: scenario.title,
+          baseText: scenario.base,
+          baseDir: base,
+          flippedTexts,
+        };
+      });
+
+    return { baseDir, hasFlip, flippedDetails };
   }, [swipeHistory]);
 
   const submitDemographics = async () => {
@@ -292,6 +359,7 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
           return;
         }
         setPhase(5);
+        markCompleted(code);
         await api.updateProgress(code, 5, 0);
         return;
       }
@@ -556,6 +624,23 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
   }
 
   // Phase 5: Debrief
+  const flushDebrief = async () => {
+    if (debriefTimer.current) {
+      clearTimeout(debriefTimer.current);
+      debriefTimer.current = null;
+    }
+    if (!debriefDirty.current) return;
+    await api.updateDebrief(code, {
+      debrief_d1: debrief.d1 || undefined,
+      debrief_d2: debrief.d2 || undefined,
+      debrief_d3: debrief.d3 || undefined,
+      debrief_d4: debrief.d4 || undefined,
+      debrief_d5: debrief.d5 || undefined,
+      debrief_d6: debrief.d6 || undefined,
+    });
+    setDebriefSaved(true);
+  };
+
   if (phase === 5) {
     const suggestedFor = (key: string): Set<string> => {
       const { baseDir, hasFlip } = debriefHints;
@@ -577,10 +662,6 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
       if (key === "d2") {
         const s = new Set<string>();
         const flippedScenarios = (["A", "B", "C"] as const).filter((c) => hasFlip[c]);
-        if (flippedScenarios.length === 0) {
-          s.add("Didn't flip on any");
-          return s;
-        }
         (DEBRIEF_QUESTIONS.find((q) => q.key === "d2")?.options ?? []).forEach((opt) => {
           const code = extractCode(opt);
           if (code && flippedScenarios.includes(code as "A" | "B" | "C")) s.add(opt);
@@ -590,34 +671,20 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
       return new Set();
     };
 
-    const saveDebrief = async () => {
-      setSavingDebrief(true);
-      try {
-        await api.updateDebrief(code, {
-          debrief_d1: debrief.d1 || undefined,
-          debrief_d2: debrief.d2 || undefined,
-          debrief_d3: debrief.d3 || undefined,
-          debrief_d4: debrief.d4 || undefined,
-          debrief_d5: debrief.d5 || undefined,
-          debrief_d6: debrief.d6 || undefined,
-        });
-        setDebriefSaved(true);
-      } finally {
-        setSavingDebrief(false);
-      }
-    };
-
     return (
       <Screen>
         <PhaseHeader phase={4} title="Debrief" />
         <p className="text-zinc-500 text-base text-center max-w-2xl">
           Thanks for swiping through all twelve scenarios. Here are a few closing
-          questions about what you just saw. All answers are optional — you can skip
+          questions about what you just saw. All answers are optional. You can skip
           any question, pick from the chips, or type your own.
         </p>
 
         <div className="w-full max-w-2xl space-y-6">
-          {DEBRIEF_QUESTIONS.map((q) => {
+          {DEBRIEF_QUESTIONS.filter(
+            (q) =>
+              !(q.key === "d2" && swipeHistoryLoaded && debriefHints.flippedDetails.length === 0)
+          ).map((q) => {
             const value = debrief[q.key];
             const parts = value
               .split(",")
@@ -628,7 +695,7 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
               const next = has
                 ? parts.filter((p) => p.toLowerCase() !== opt.toLowerCase())
                 : [...parts, opt];
-              setDebrief({ ...debrief, [q.key]: next.join(", ") });
+              updateDebriefField(q.key, next.join(", "));
             };
             const PREVIEW_COUNT = 8;
             const debriefExpandedKey = `debrief-${q.key}`;
@@ -652,6 +719,38 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
                 <label className="block text-zinc-700 font-medium text-base">
                   {q.prompt}
                 </label>
+                {q.key === "d2" && debriefHints.flippedDetails.length > 0 && (
+                  <div className="bg-white border border-zinc-200 rounded-xl p-4 text-sm space-y-3">
+                    <p className="text-zinc-500 text-xs uppercase tracking-wide">
+                      Here&apos;s what you flipped on:
+                    </p>
+                    {debriefHints.flippedDetails.map((d) => (
+                      <div key={d.scenarioCode} className="space-y-1.5">
+                        <p className="text-zinc-700 font-medium">
+                          Scenario {d.scenarioCode}: {d.scenarioTitle}
+                        </p>
+                        <div className="text-zinc-600 leading-relaxed">
+                          <span className="text-zinc-400 text-xs">
+                            You swiped{" "}
+                            <span className={d.baseDir === "right" ? "text-green-600" : "text-red-500"}>
+                              {d.baseDir}
+                            </span>{" "}
+                            on:
+                          </span>
+                          <p className="italic text-zinc-700">&ldquo;{d.baseText}&rdquo;</p>
+                        </div>
+                        <div className="text-zinc-600 leading-relaxed">
+                          <span className="text-zinc-400 text-xs">
+                            Then flipped on:
+                          </span>
+                          {d.flippedTexts.map((t, i) => (
+                            <p key={i} className="italic text-zinc-700">&ldquo;{t}&rdquo;</p>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {q.options && (
                   <div className="flex flex-wrap gap-2 items-center">
                     {visibleOptions.map((opt) => {
@@ -698,7 +797,7 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
                 )}
                 <textarea
                   value={value}
-                  onChange={(e) => setDebrief({ ...debrief, [q.key]: e.target.value })}
+                  onChange={(e) => updateDebriefField(q.key, e.target.value)}
                   placeholder={q.placeholder}
                   rows={3}
                   className="input-field resize-y"
@@ -707,26 +806,17 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
             );
           })}
 
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              onClick={saveDebrief}
-              disabled={savingDebrief}
-              className="btn-primary"
-            >
-              {savingDebrief
-                ? "Saving..."
-                : debriefSaved
-                  ? "Save changes"
-                  : "Save my answers"}
-            </button>
-            {debriefSaved && !savingDebrief && (
-              <span className="text-green-600 text-sm">Saved.</span>
-            )}
+          <div className="text-sm text-zinc-400 min-h-5">
+            {savingDebrief
+              ? "Saving..."
+              : debriefSaved
+                ? <span className="text-green-600">Saved.</span>
+                : "Your answers save automatically."}
           </div>
         </div>
 
         {/* Optional researcher chat opt-in */}
-        <div className="max-w-2xl w-full border border-zinc-200 rounded-2xl p-6 space-y-4">
+        <div className="max-w-2xl w-full bg-white border border-zinc-200 rounded-2xl p-6 space-y-4">
           <div>
             <p className="text-zinc-700 text-base font-medium">
               Want to talk this over with us?
@@ -746,8 +836,9 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
               </button>
               <button
                 onClick={async () => {
+                  await flushDebrief();
                   await api.updateProgress(code, 5, 0);
-                  router.push("/");
+                  router.push("/thank-you");
                 }}
                 className="btn-secondary"
               >
@@ -774,6 +865,7 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
               <button
                 onClick={async () => {
                   if (!email && !phone) return;
+                  await flushDebrief();
                   await api.updateContact(code, {
                     email: email || undefined,
                     phone: phone || undefined,
@@ -794,8 +886,9 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
               </p>
               <button
                 onClick={async () => {
+                  await flushDebrief();
                   await api.updateProgress(code, 5, 0);
-                  router.push("/");
+                  router.push("/thank-you");
                 }}
                 className="btn-secondary w-full"
               >
@@ -807,8 +900,9 @@ export default function SessionPage({ params }: { params: Promise<{ code: string
 
         <button
           onClick={async () => {
+            await flushDebrief();
             await api.updateProgress(code, 5, 0);
-            router.push("/");
+            router.push("/thank-you");
           }}
           className="text-sm text-zinc-400 hover:text-zinc-600 underline underline-offset-4"
         >

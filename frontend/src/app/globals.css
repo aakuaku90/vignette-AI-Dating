@@ -2,27 +2,27 @@
 @source "../**/*.{ts,tsx,js,jsx,mdx}";
 
 @theme inline {
-  --color-background: #ffffff;
+  --color-background: #f4f2ee;
   --color-foreground: #09090b;
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
 :root {
-  --background: #ffffff !important;
+  --background: #f4f2ee !important;
   --foreground: #09090b !important;
   color-scheme: light !important;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #ffffff !important;
+    --background: #f4f2ee !important;
     --foreground: #09090b !important;
   }
 }
 
 html, body {
-  background-color: #ffffff !important;
+  background-color: #f4f2ee !important;
   color: #09090b !important;
   font-family: Arial, Helvetica, sans-serif;
   overscroll-behavior: none;
@@ -31,7 +31,7 @@ html, body {
 .input-field {
   width: 100%;
   padding: 0.75rem 1rem;
-  background: #f4f4f5;
+  background: #ffffff;
   border: 1px solid #e4e4e7;
   border-radius: 0.75rem;
   color: #09090b;
