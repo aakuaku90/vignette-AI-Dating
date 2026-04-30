@@ -45,12 +45,12 @@ html, body {
 }
 
 .btn-primary {
-  padding: 0.25rem 0.75rem;
+  padding: 0.75rem 2rem;
   background: linear-gradient(135deg, #7c3aed, #a78bfa);
   color: white;
   font-weight: 600;
   border-radius: 9999px;
-  font-size: 0.875rem;
+  font-size: 1rem;
   transition: opacity 0.2s;
   cursor: pointer;
 }
@@ -65,13 +65,13 @@ html, body {
 }
 
 .btn-secondary {
-  padding: 0.25rem 0.75rem;
+  padding: 0.75rem 2rem;
   background: transparent;
   border: 1px solid #e4e4e7;
   color: #71717a;
   font-weight: 600;
   border-radius: 9999px;
-  font-size: 0.875rem;
+  font-size: 1rem;
   transition: all 0.2s;
   cursor: pointer;
 }
@@ -79,4 +79,10 @@ html, body {
 .btn-secondary:hover {
   border-color: #a1a1aa;
   color: #09090b;
+}
+
+.admin-scope .btn-primary,
+.admin-scope .btn-secondary {
+  padding: 0.25rem 0.75rem;
+  font-size: 0.875rem;
 }

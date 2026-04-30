@@ -74,7 +74,7 @@ export default function AdminSlugLayout({
 
   if (!authed) {
     return (
-      <div className="min-h-[100dvh] flex items-center justify-center px-6">
+      <div className="admin-scope min-h-[100dvh] flex items-center justify-center px-6">
         <form onSubmit={handleSubmit} className="w-full max-w-sm space-y-5">
           <div className="text-center">
             <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center">
@@ -118,5 +118,5 @@ export default function AdminSlugLayout({
     );
   }
 
-  return <>{children}</>;
+  return <div className="admin-scope">{children}</div>;
 }
