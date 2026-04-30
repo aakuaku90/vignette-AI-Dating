@@ -37,6 +37,14 @@ class ScenarioOrderUpdate(BaseModel):
     scenario_order: str
 
 
+class DeleteParticipants(BaseModel):
+    session_codes: list[str]
+
+
+class DeleteParticipantsResult(BaseModel):
+    deleted: int
+
+
 class ParticipantOut(BaseModel):
     id: uuid.UUID
     session_code: str

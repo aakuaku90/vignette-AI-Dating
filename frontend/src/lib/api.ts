@@ -168,4 +168,10 @@ export const api = {
     }>("/api/admin/stats"),
 
   exportData: () => adminRequest<Record<string, unknown>[]>("/api/admin/export"),
+
+  deleteParticipants: (sessionCodes: string[]) =>
+    adminRequest<{ deleted: number }>("/api/admin/participants/delete", {
+      method: "POST",
+      body: JSON.stringify({ session_codes: sessionCodes }),
+    }),
 };

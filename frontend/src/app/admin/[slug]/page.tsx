@@ -33,6 +33,43 @@ export default function AdminPage() {
   const [responses, setResponses] = useState<SwipeResponseData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const toggleChecked = (code: string) => {
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    setChecked((prev) =>
+      prev.size === participants.length ? new Set() : new Set(participants.map((p) => p.session_code))
+    );
+  };
+
+  const deleteSelected = async () => {
+    const codes = Array.from(checked);
+    if (codes.length === 0) return;
+    setDeleting(true);
+    try {
+      await api.deleteParticipants(codes);
+      const [s, p] = await Promise.all([api.getStats(), api.listParticipants()]);
+      setStats(s);
+      setParticipants(p);
+      setChecked(new Set());
+      if (selected && codes.includes(selected)) setSelected(null);
+      setConfirmOpen(false);
+    } catch {
+      alert("Delete failed. Please try again.");
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   useEffect(() => {
     Promise.all([api.getStats(), api.listParticipants()])
@@ -105,6 +142,16 @@ export default function AdminPage() {
             <p className="text-zinc-400 text-sm">Swipe to Decide · Data Overview</p>
           </div>
           <div className="flex gap-3">
+            {checked.size > 0 && (
+              <button
+                onClick={() => setConfirmOpen(true)}
+                disabled={deleting}
+                className="btn-primary"
+                style={{ background: "linear-gradient(135deg, #dc2626, #f87171)" }}
+              >
+                {deleting ? "Deleting..." : `Delete selected (${checked.size})`}
+              </button>
+            )}
             <button onClick={exportCSV} className="btn-primary">
               Export CSV
             </button>
@@ -160,6 +207,17 @@ export default function AdminPage() {
           <table className="w-full text-sm whitespace-nowrap">
             <thead>
               <tr className="border-b border-zinc-200 text-zinc-400 text-left">
+                <th className="p-4 w-10">
+                  <input
+                    type="checkbox"
+                    checked={participants.length > 0 && checked.size === participants.length}
+                    ref={(el) => {
+                      if (el) el.indeterminate = checked.size > 0 && checked.size < participants.length;
+                    }}
+                    onChange={toggleAll}
+                    className="w-4 h-4 cursor-pointer accent-violet-600"
+                  />
+                </th>
                 <th className="p-4">Code</th>
                 <th className="p-4">Age</th>
                 <th className="p-4">Gender</th>
@@ -184,6 +242,15 @@ export default function AdminPage() {
                     selected === p.session_code ? "bg-violet-50" : ""
                   }`}
                 >
+                  <td className="p-4">
+                    <input
+                      type="checkbox"
+                      checked={checked.has(p.session_code)}
+                      onChange={() => toggleChecked(p.session_code)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="w-4 h-4 cursor-pointer accent-violet-600"
+                    />
+                  </td>
                   <td className="p-4 font-mono">{p.session_code}</td>
                   <td className="p-4">{p.age ?? "-"}</td>
                   <td className="p-4">{p.gender ?? "-"}</td>
@@ -240,7 +307,7 @@ export default function AdminPage() {
               ))}
               {participants.length === 0 && (
                 <tr>
-                  <td colSpan={13} className="p-8 text-center text-zinc-400">
+                  <td colSpan={14} className="p-8 text-center text-zinc-400">
                     No participants yet.
                   </td>
                 </tr>
@@ -389,6 +456,71 @@ export default function AdminPage() {
         </>
       )}
 
+      {/* Delete confirmation modal */}
+      {confirmOpen && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/40 z-50 animate-fade-in"
+            onClick={() => !deleting && setConfirmOpen(false)}
+          />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+            <div
+              className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 pointer-events-auto animate-pop-in"
+              role="dialog"
+              aria-modal="true"
+            >
+              <div className="flex items-start gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-red-50 flex items-center justify-center shrink-0">
+                  <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <h2 className="text-lg font-semibold text-zinc-900">
+                    Delete {checked.size} participant{checked.size === 1 ? "" : "s"}?
+                  </h2>
+                  <p className="text-sm text-zinc-500 mt-1 leading-relaxed">
+                    Their swipe responses will also be removed. This action cannot be undone.
+                  </p>
+                </div>
+              </div>
+
+              {checked.size <= 8 && (
+                <div className="bg-zinc-50 border border-zinc-100 rounded-lg px-3 py-2 mb-4 max-h-32 overflow-y-auto">
+                  <div className="flex flex-wrap gap-1.5">
+                    {Array.from(checked).map((code) => (
+                      <span
+                        key={code}
+                        className="font-mono text-xs bg-white border border-zinc-200 rounded px-1.5 py-0.5 text-zinc-700"
+                      >
+                        {code}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setConfirmOpen(false)}
+                  disabled={deleting}
+                  className="px-4 py-2 rounded-full text-sm font-medium text-zinc-700 hover:bg-zinc-100 transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={deleteSelected}
+                  disabled={deleting}
+                  className="px-4 py-2 rounded-full text-sm font-medium text-white bg-red-500 hover:bg-red-600 transition-colors disabled:opacity-50"
+                >
+                  {deleting ? "Deleting..." : "Delete"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
       <style jsx>{`
         @keyframes slide-in {
           from {
@@ -400,6 +532,30 @@ export default function AdminPage() {
         }
         .animate-slide-in {
           animation: slide-in 0.2s ease-out;
+        }
+        @keyframes fade-in {
+          from {
+            opacity: 0;
+          }
+          to {
+            opacity: 1;
+          }
+        }
+        .animate-fade-in {
+          animation: fade-in 0.15s ease-out;
+        }
+        @keyframes pop-in {
+          from {
+            opacity: 0;
+            transform: scale(0.95);
+          }
+          to {
+            opacity: 1;
+            transform: scale(1);
+          }
+        }
+        .animate-pop-in {
+          animation: pop-in 0.18s ease-out;
         }
       `}</style>
     </div>

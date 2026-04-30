@@ -13,6 +13,8 @@ from ..models.models import Participant, Response
 from ..schemas.schemas import (
     AdminStats,
     ContactUpdate,
+    DeleteParticipants,
+    DeleteParticipantsResult,
     ParticipantCreate,
     ParticipantDetail,
     ParticipantOut,
@@ -219,6 +221,26 @@ async def verify_admin_key(_: None = Depends(require_admin)):
 async def list_participants(_: None = Depends(require_admin), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Participant).order_by(Participant.started_at.desc()))
     return result.scalars().all()
+
+
+@router.post("/admin/participants/delete", response_model=DeleteParticipantsResult)
+async def delete_participants(
+    data: DeleteParticipants,
+    _: None = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    if not data.session_codes:
+        return DeleteParticipantsResult(deleted=0)
+    result = await db.execute(
+        select(Participant)
+        .where(Participant.session_code.in_(data.session_codes))
+        .options(selectinload(Participant.responses))
+    )
+    participants = result.scalars().all()
+    for p in participants:
+        await db.delete(p)
+    await db.commit()
+    return DeleteParticipantsResult(deleted=len(participants))
 
 
 @router.get("/admin/participants/{session_code}", response_model=ParticipantDetail)
