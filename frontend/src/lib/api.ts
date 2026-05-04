@@ -169,6 +169,24 @@ export const api = {
 
   exportData: () => adminRequest<Record<string, unknown>[]>("/api/admin/export"),
 
+  exportCSV: async (): Promise<Blob> => {
+    const key = getAdminKey();
+    const res = await fetch(`${API}/api/admin/export.csv`, {
+      headers: key ? { "X-Admin-Key": key } : {},
+    });
+    if (!res.ok) throw new Error(`API error: ${res.status}`);
+    return res.blob();
+  },
+
+  exportCodebook: async (): Promise<Blob> => {
+    const key = getAdminKey();
+    const res = await fetch(`${API}/api/admin/codebook.csv`, {
+      headers: key ? { "X-Admin-Key": key } : {},
+    });
+    if (!res.ok) throw new Error(`API error: ${res.status}`);
+    return res.blob();
+  },
+
   deleteParticipants: (sessionCodes: string[]) =>
     adminRequest<{ deleted: number }>("/api/admin/participants/delete", {
       method: "POST",

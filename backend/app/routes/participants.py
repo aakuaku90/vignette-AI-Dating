@@ -1,14 +1,23 @@
+import csv
+import io
 import random
 import string
 import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func as sqlfunc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..config import settings
 from ..database import get_db
+from ..instrument import (
+    DEBRIEF_QUESTIONS,
+    SCENARIOS,
+    WARMUP_QUESTIONS,
+    lookup_variant,
+)
 from ..models.models import Participant, Response
 from ..schemas.schemas import (
     AdminStats,
@@ -348,3 +357,120 @@ async def export_data(_: None = Depends(require_admin), db: AsyncSession = Depen
         }
         for r in rows
     ]
+
+
+@router.get("/admin/export.csv")
+async def export_data_csv(_: None = Depends(require_admin), db: AsyncSession = Depends(get_db)):
+    """Export all responses as RFC 4180 CSV (proper quote/comma escaping).
+
+    Columns are ordered to match the participant timeline:
+    demographics (phase 0) → warmup (phase 2) → swipe (phase 3) → debrief + contact (phase 4).
+    """
+    result = await db.execute(
+        select(
+            Participant.session_code,
+            Participant.age,
+            Participant.gender,
+            Participant.university,
+            Participant.state,
+            Participant.warmup_w1,
+            Participant.warmup_w2,
+            Participant.warmup_w3,
+            Participant.warmup_w4,
+            Participant.scenario_order,
+            Response.phase,
+            Response.stage,
+            Response.card_number,
+            Response.variant_code,
+            Response.swiped_right,
+            Response.response_time_ms,
+            Response.created_at,
+            Participant.debrief_d1,
+            Participant.debrief_d2,
+            Participant.debrief_d3,
+            Participant.debrief_d4,
+            Participant.debrief_d5,
+            Participant.debrief_d6,
+            Participant.email,
+            Participant.phone,
+        )
+        .join(Response, Response.participant_id == Participant.id)
+        .order_by(Participant.session_code, Response.phase, Response.stage, Response.card_number)
+    )
+    rows = result.all()
+
+    headers = [
+        "session_code",
+        "age", "gender", "university", "state",
+        "warmup_w1", "warmup_w2", "warmup_w3", "warmup_w4",
+        "scenario_order",
+        "phase", "stage", "card_number",
+        "variant_code", "scenario_title", "exit_factor", "direction", "pressure_level", "prompt_text",
+        "swiped_right", "response_time_ms", "created_at",
+        "debrief_d1", "debrief_d2", "debrief_d3", "debrief_d4", "debrief_d5", "debrief_d6",
+        "email", "phone",
+    ]
+
+    buf = io.StringIO()
+    writer = csv.writer(buf, quoting=csv.QUOTE_MINIMAL, lineterminator="\n")
+    writer.writerow(headers)
+    for r in rows:
+        meta = lookup_variant(r[13])
+        created = r[16].isoformat() if r[16] else ""
+        out = [
+            r[0],
+            r[1], r[2], r[3], r[4],
+            r[5], r[6], r[7], r[8],
+            r[9],
+            r[10], r[11], r[12],
+            r[13],
+            meta["scenario_title"], meta["exit_factor"], meta["direction"],
+            meta["pressure_level"], meta["prompt_text"],
+            r[14], r[15], created,
+            r[17], r[18], r[19], r[20], r[21], r[22],
+            r[23], r[24],
+        ]
+        writer.writerow(["" if v is None else v for v in out])
+
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="swipe-to-decide-export.csv"'},
+    )
+
+
+@router.get("/admin/codebook.csv")
+async def export_codebook(_: None = Depends(require_admin)):
+    """Standalone codebook documenting variant codes, warmup, and debrief questions."""
+    buf = io.StringIO()
+    writer = csv.writer(buf, quoting=csv.QUOTE_MINIMAL, lineterminator="\n")
+
+    writer.writerow(["section", "code", "field", "value"])
+
+    for sc, scenario in SCENARIOS.items():
+        for field in ("title", "subtitle", "exit_factor", "base"):
+            writer.writerow(["scenario", sc, field, scenario[field]])
+
+    for sc, scenario in SCENARIOS.items():
+        for direction_key, direction_label in (("left", "left"), ("right", "right")):
+            for code, text in scenario[direction_key]:
+                pressure = code.split("-")[1][1]
+                writer.writerow(["variant", code, "scenario", sc])
+                writer.writerow(["variant", code, "direction", direction_label])
+                writer.writerow(["variant", code, "pressure_level", pressure])
+                writer.writerow(["variant", code, "prompt_text", text])
+
+    for q in WARMUP_QUESTIONS:
+        writer.writerow(["warmup", q["key"], "label", q["label"]])
+        writer.writerow(["warmup", q["key"], "prompt", q["prompt"]])
+
+    for q in DEBRIEF_QUESTIONS:
+        writer.writerow(["debrief", q["key"], "prompt", q["prompt"]])
+
+    buf.seek(0)
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="swipe-to-decide-codebook.csv"'},
+    )

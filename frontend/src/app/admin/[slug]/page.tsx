@@ -91,18 +91,22 @@ export default function AdminPage() {
   };
 
   const exportCSV = async () => {
-    const data = await api.exportData();
-    if (data.length === 0) return alert("No data to export.");
-    const headers = Object.keys(data[0]);
-    const csv = [
-      headers.join(","),
-      ...data.map((row) => headers.map((h) => JSON.stringify(row[h] ?? "")).join(",")),
-    ].join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
+    const blob = await api.exportCSV();
+    if (blob.size === 0) return alert("No data to export.");
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `chase-export-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `swipe-to-decide-export-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportCodebook = async () => {
+    const blob = await api.exportCodebook();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `swipe-to-decide-codebook-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -154,6 +158,9 @@ export default function AdminPage() {
             )}
             <button onClick={exportCSV} className="btn-primary">
               Export CSV
+            </button>
+            <button onClick={exportCodebook} className="btn-secondary">
+              Codebook
             </button>
             <a href={`/admin/${ADMIN_SLUG}/charts`} className="btn-primary inline-block">
               Charts
